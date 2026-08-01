@@ -181,12 +181,13 @@
   }
   .tab{
     flex:1;
+    min-width:0;
     text-align:center;
     background:none;border:none;
     font-family:'Nunito';font-weight:800;
-    font-size:12px;
+    font-size:11px;
     color:var(--plum-soft);
-    padding:8px 4px;
+    padding:8px 2px;
     border-radius:12px;
     cursor:pointer;
   }
@@ -291,6 +292,31 @@
   .pad-avail{font-size:12px;color:var(--plum-soft);margin-bottom:14px;}
   .pad-actions{display:flex;gap:10px;}
   .pad-actions .btn{flex:1;}
+  .file-btn{
+    display:inline-block;background:#E7F7F4;color:var(--teal-dark);
+    border-radius:12px;padding:10px 14px;
+    font-weight:800;font-size:13px;cursor:pointer;
+  }
+  .file-btn:active{transform:scale(0.95);}
+  .file-btn input{display:none;}
+  .qr-preview{
+    margin-top:12px;text-align:center;
+    background:#FFFEFA;border:1px solid var(--line);
+    border-radius:14px;padding:12px;
+  }
+  .qr-preview img{
+    width:170px;height:170px;object-fit:contain;
+    border-radius:8px;background:#fff;cursor:pointer;
+  }
+  .qr-hint{font-size:12px;color:var(--plum-soft);margin-top:8px;}
+  .qr-full{
+    width:100%;max-width:260px;aspect-ratio:1;
+    object-fit:contain;background:#fff;
+    border-radius:12px;margin:8px 0 14px;
+  }
+  .danger-card{border-color:#F3C9C9;}
+  .danger-card h3{color:var(--danger);}
+  .danger-note{font-size:12.5px;color:var(--plum-soft);margin-bottom:12px;line-height:1.45;}
 </style>
 </head>
 <body>
@@ -301,10 +327,11 @@
 <div class="toast" id="toast"></div>
 
 <div class="tabbar" id="tabbar" style="display:none;">
-  <button class="tab" data-tab="sell"><span class="ic">&#127866;</span>Sell</button>
+  <button class="tab" data-tab="sell"><span class="ic">&#129534;</span>Sell</button>
   <button class="tab" data-tab="restock"><span class="ic">&#128257;</span>Restock</button>
   <button class="tab" data-tab="sales"><span class="ic">&#128203;</span>Sales</button>
-  <button class="tab" data-tab="setup"><span class="ic">&#9881;</span>Products</button>
+  <button class="tab" data-tab="setup"><span class="ic">&#128230;</span>Products</button>
+  <button class="tab" data-tab="settings"><span class="ic">&#9881;</span>Settings</button>
 </div>
 
 <script>
@@ -312,7 +339,7 @@ const STORAGE_KEY = "lemonade-stand-state";
 const EMOJI_CHOICES = ["🍋","🥤","🍬","🍫","🍪","🧃","🍭","🥨","🧋","🍩","🍇","🧁"];
 const QUICK_PICKS = [1, 2, 5, 10];
 const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
-let state = { products: [], sales: [] };
+let state = { products: [], sales: [], settings: { qr: null } };
 let cart = {};
 let currentTab = "sell";
 let lastSale = null;
@@ -333,15 +360,25 @@ function loadState(){
       state.products.forEach(p=>{ if(typeof p.cost !== "number") p.cost = 0; });
     }
   }catch(e){
-    state = { products: [], sales: [] };
+    state = { products: [], sales: [], settings: { qr: null } };
   }
+  // Data saved before settings existed has no settings key.
+  if(!state.products) state.products = [];
+  if(!state.sales) state.sales = [];
+  if(!state.settings) state.settings = { qr: null };
+  if(typeof state.settings.qr === "undefined") state.settings.qr = null;
 }
 
+// Returns false when the write failed, so callers that just grew the state
+// (an uploaded image, say) can roll their change back instead of leaving
+// memory and storage disagreeing.
 function saveState(){
   try{
     localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    return true;
   }catch(e){
     showToast("Couldn't save — try again");
+    return false;
   }
 }
 
@@ -561,6 +598,7 @@ function renderCart(){
       <span>${count} item${count===1?"":"s"}</span>
       <span class="amt">${money(cartTotal())}</span>
     </div>
+    ${state.settings.qr ? `<button class="btn btn-teal-outline btn-full" style="margin-top:10px;" onclick="showPaymentCode()">Show payment code</button>` : ""}
     <button class="btn btn-pink btn-full" style="margin-top:10px;" onclick="completeSale()">Complete sale</button>
   </div>`;
 }
@@ -710,7 +748,11 @@ function renderSales(){
       </div>`;
     }).join("") + `</div>`;
   }
-  wrap.innerHTML = statsHtml + `<div class="section-title">By product</div>` + breakdownHtml +
+  const exportHtml = state.sales.length
+    ? `<button class="btn btn-teal-outline btn-full" style="margin-bottom:16px;" onclick="exportSalesCsv()">Export sales to CSV</button>`
+    : "";
+  wrap.innerHTML = statsHtml + exportHtml +
+    `<div class="section-title">By product</div>` + breakdownHtml +
     `<div class="section-title">Recent sales</div>` + logHtml;
 }
 
@@ -817,6 +859,186 @@ function addProduct(){
   showToast("Product added");
 }
 
+function csvCell(value){
+  const s = String(value);
+  return /[",\r\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+
+function pad2(n){ return n < 10 ? "0" + n : String(n); }
+
+function exportSalesCsv(){
+  if(state.sales.length === 0){
+    showToast("No sales to export yet");
+    return;
+  }
+  // One row per line item, so a spreadsheet can pivot by product or by day.
+  // Sales are stored oldest-first, which is the order a spreadsheet wants.
+  const rows = [[
+    "Date","Time","Sale ID","Product","Quantity",
+    "Unit price","Unit cost","Line revenue","Line cost","Line profit"
+  ]];
+  state.sales.forEach(sale=>{
+    const d = new Date(sale.time);
+    const date = d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
+    const time = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
+    sale.items.forEach(it=>{
+      const revenue = it.price * it.qty;
+      const cost = it.cost * it.qty;
+      rows.push([
+        date, time, sale.id, it.name, it.qty,
+        it.price.toFixed(2), it.cost.toFixed(2),
+        revenue.toFixed(2), cost.toFixed(2), (revenue - cost).toFixed(2)
+      ]);
+    });
+  });
+
+  const csv = rows.map(r=> r.map(csvCell).join(",")).join("\r\n");
+  const now = new Date();
+  const stamp = now.getFullYear() + "-" + pad2(now.getMonth()+1) + "-" + pad2(now.getDate());
+  // The BOM makes Excel read it as UTF-8 rather than mangling accented names.
+  downloadFile("﻿" + csv, "lemonade-sales-" + stamp + ".csv", "text/csv;charset=utf-8");
+  showToast("Sales exported");
+}
+
+function downloadFile(text, filename, mime){
+  const blob = new Blob([text], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(()=> URL.revokeObjectURL(url), 1000);
+}
+
+function renderSettings(){
+  const wrap = document.getElementById("settingsBody");
+  if(!wrap) return;
+  const qr = state.settings.qr;
+  wrap.innerHTML = `
+    <div class="form-card">
+      <h3>Payment code</h3>
+      <div class="danger-note">
+        Upload the QR code from your payment app so customers can scan it to pay.
+        It shows up as a <b>Show payment code</b> button on the Sell tab whenever
+        there's something in the cart.
+      </div>
+      <label class="file-btn">
+        ${qr ? "Replace image" : "Choose image"}
+        <input type="file" accept="image/*" id="qrFile" onchange="handleQrFile(this)">
+      </label>
+      ${qr ? `
+        <div class="qr-preview">
+          <img src="${qr}" alt="Payment QR code" onclick="showPaymentCode()">
+          <div class="qr-hint">Tap to see it full size</div>
+        </div>
+        <button class="btn btn-danger btn-full" style="margin-top:12px;" onclick="removeQr()">Remove payment code</button>
+      ` : ""}
+    </div>
+
+    <div class="form-card danger-card">
+      <h3>Reset everything</h3>
+      <div class="danger-note">
+        Deletes every product, all ${state.sales.length} recorded sale${state.sales.length===1?"":"s"},
+        and the payment code. This can't be undone, and there's no backup —
+        export your sales from the Sales tab first if you want to keep them.
+      </div>
+      <button class="btn btn-danger btn-full" onclick="resetAllData()">Delete all data</button>
+    </div>`;
+}
+
+// Photos straight from a phone camera are far too large for localStorage, so
+// the image is scaled down and re-encoded before it's stored. 600px keeps a
+// QR comfortably scannable while landing well inside the storage budget.
+function handleQrFile(input){
+  const file = input.files && input.files[0];
+  if(!file) return;
+  if(!/^image\//.test(file.type)){
+    showToast("Pick an image file");
+    input.value = "";
+    return;
+  }
+  const reader = new FileReader();
+  reader.onerror = ()=>{ showToast("Couldn't read that file"); input.value = ""; };
+  reader.onload = ()=>{
+    const img = new Image();
+    img.onerror = ()=>{ showToast("Couldn't read that image"); input.value = ""; };
+    img.onload = ()=>{
+      const MAX = 600;
+      let w = img.width, h = img.height;
+      if(w > MAX || h > MAX){
+        const scale = Math.min(MAX / w, MAX / h);
+        w = Math.max(1, Math.round(w * scale));
+        h = Math.max(1, Math.round(h * scale));
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      // A transparent PNG would otherwise go black and stop scanning.
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, w, h);
+      ctx.drawImage(img, 0, 0, w, h);
+
+      const previous = state.settings.qr;
+      state.settings.qr = canvas.toDataURL("image/jpeg", 0.92);
+      if(saveState()){
+        showToast("Payment code saved");
+      } else {
+        state.settings.qr = previous;
+        showToast("That image was too big to save");
+      }
+      input.value = "";
+      renderSettings();
+      renderSell();
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+function removeQr(){
+  state.settings.qr = null;
+  saveState();
+  renderSettings();
+  renderSell();
+  showToast("Payment code removed");
+}
+
+function showPaymentCode(){
+  if(!state.settings.qr) return;
+  document.getElementById("overlayHost").innerHTML = `
+    <div class="pad-overlay" onclick="if(event.target===this) closePaymentCode()">
+      <div class="pad-card">
+        <div class="pad-name">Scan to pay</div>
+        <img src="${state.settings.qr}" class="qr-full" alt="Payment QR code">
+        <div class="pad-actions">
+          <button class="btn btn-ghost" onclick="closePaymentCode()">Done</button>
+        </div>
+      </div>
+    </div>`;
+}
+
+function closePaymentCode(){
+  const host = document.getElementById("overlayHost");
+  if(host) host.innerHTML = "";
+}
+
+function resetAllData(){
+  if(!confirm("Delete all products, sales, and the payment code?\n\nThis cannot be undone.")) return;
+  try{
+    localStorage.removeItem(STORAGE_KEY);
+  }catch(e){ /* clearing a key that isn't there is not a failure */ }
+  state = { products: [], sales: [], settings: { qr: null } };
+  cart = {};
+  padProductId = null;
+  closePaymentCode();
+  renderTop();
+  renderSell(); renderRestock(); renderSales(); renderSetup(); renderSettings();
+  showToast("All data cleared");
+}
+
 function switchTab(tab){
   currentTab = tab;
   document.querySelectorAll("section").forEach(s=> s.classList.remove("active"));
@@ -829,6 +1051,7 @@ function switchTab(tab){
   if(tab==="restock") renderRestock();
   if(tab==="sales") renderSales();
   if(tab==="setup") renderSetup();
+  if(tab==="settings") renderSettings();
 }
 
 function buildApp(){
@@ -884,7 +1107,12 @@ function buildApp(){
       <div id="setupList"></div>
     </section>
 
+    <section id="sec-settings">
+      <div id="settingsBody"></div>
+    </section>
+
     <div id="padHost"></div>
+    <div id="overlayHost"></div>
   `;
   const pick = document.getElementById("emojiPick");
   EMOJI_CHOICES.forEach((e,i)=>{
@@ -915,7 +1143,9 @@ function buildApp(){
   });
 
   document.addEventListener("keydown", e=>{
-    if(e.key === "Escape" && padProductId) closeQtyPad();
+    if(e.key !== "Escape") return;
+    if(padProductId) closeQtyPad();
+    closePaymentCode();
   });
 
   renderTop();
