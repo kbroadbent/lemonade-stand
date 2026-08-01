@@ -226,7 +226,7 @@
   }
   .toast.show{opacity:1;top:26px;}
   .loading{text-align:center;padding:60px 20px;color:var(--plum-soft);}
-  .stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;}
   .stat-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:center;}
   .stat-card .num{font-family:'Baloo 2';font-size:19px;font-weight:800;}
   .stat-card .lab{font-size:11px;color:var(--plum-soft);margin-top:2px;}
@@ -391,7 +391,6 @@ function renderTop(){
   if(!box) return;
   if(currentTab !== "sales"){ box.innerHTML = ""; return; }
   const rev = totalRevenue();
-  const profit = totalProfit();
   const goal = 100;
   const pct = rev / goal;
   box.innerHTML = `
@@ -399,7 +398,7 @@ function renderTop(){
       ${jarSvg(pct)}
       <div class="jar-stats">
         <div class="jar-total">${money(rev)}</div>
-        <div class="jar-label">total earned &nbsp;•&nbsp; ${money(profit)} profit</div>
+        <div class="jar-label">total earned</div>
         <div class="jar-sub">${totalItemsSold()} items sold</div>
       </div>
     </div>`;
@@ -663,7 +662,6 @@ function moveToStand(id){
 
 function renderSales(){
   const wrap = document.getElementById("salesList");
-  const rev = totalRevenue();
   const cost = totalCost();
   const profit = totalProfit();
   let byProduct = {};
@@ -675,8 +673,8 @@ function renderSales(){
       byProduct[it.name].cost += it.cost * it.qty;
     });
   });
+  // Revenue is the jar's headline number just above, so it isn't repeated here.
   let statsHtml = `<div class="stat-grid">
-      <div class="stat-card"><div class="num">${money(rev)}</div><div class="lab">revenue</div></div>
       <div class="stat-card"><div class="num">${money(cost)}</div><div class="lab">cost</div></div>
       <div class="stat-card"><div class="num">${money(profit)}</div><div class="lab">profit</div></div>
     </div>`;
