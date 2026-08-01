@@ -153,6 +153,13 @@
     background:#FFFEFA;
   }
   input:focus{outline:2px solid var(--lemon);border-color:transparent;}
+  input.invalid{border-color:var(--danger);background:#FFF6F6;}
+  input.invalid:focus{outline:2px solid var(--danger);}
+  .field-error{
+    font-size:12px;font-weight:700;color:var(--danger);
+    margin-top:5px;display:none;
+  }
+  .field-error.show{display:block;}
   .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
   .emoji-pick{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
   .emoji-opt{
@@ -304,6 +311,7 @@
 const STORAGE_KEY = "lemonade-stand-state";
 const EMOJI_CHOICES = ["🍋","🥤","🍬","🍫","🍪","🧃","🍭","🥨","🧋","🍩","🍇","🧁"];
 const QUICK_PICKS = [1, 2, 5, 10];
+const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
 let state = { products: [], sales: [] };
 let cart = {};
 let currentTab = "sell";
@@ -735,16 +743,69 @@ function removeProduct(id){
   showToast("Product removed");
 }
 
+function clearFieldErrors(){
+  PRODUCT_FIELDS.forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.classList.remove("invalid");
+    const err = document.getElementById(id + "Err");
+    if(err){ err.textContent = ""; err.classList.remove("show"); }
+  });
+}
+
+function markField(id, msg){
+  const el = document.getElementById(id);
+  if(el) el.classList.add("invalid");
+  const err = document.getElementById(id + "Err");
+  if(err){ err.textContent = msg; err.classList.add("show"); }
+}
+
 function addProduct(){
+  clearFieldErrors();
   const name = document.getElementById("newName").value.trim();
-  const price = parseFloat(document.getElementById("newPrice").value);
-  const cost = parseFloat(document.getElementById("newCost").value || "0");
-  const home = parseInt(document.getElementById("newHome").value || "0", 10);
+  const priceRaw = document.getElementById("newPrice").value.trim();
+  const costRaw = document.getElementById("newCost").value.trim();
+  const homeRaw = document.getElementById("newHome").value.trim();
   const emojiEl = document.querySelector(".emoji-opt.sel");
   const emoji = emojiEl ? emojiEl.textContent : "🍋";
-  if(!name){ showToast("Give it a name first"); return; }
-  if(isNaN(price) || price < 0){ showToast("Enter a valid sell price"); return; }
-  state.products.push({ id: uid(), name, price, cost: isNaN(cost)?0:cost, emoji, home: isNaN(home)?0:home, stand: 0 });
+
+  // Every field is checked before bailing out, so a form with two problems
+  // highlights both at once instead of surfacing them one reload at a time.
+  const bad = [];
+  if(!name){
+    markField("newName", "Give it a name");
+    bad.push("newName");
+  }
+
+  const price = parseFloat(priceRaw);
+  if(priceRaw === ""){
+    markField("newPrice", "Enter a sell price");
+    bad.push("newPrice");
+  } else if(isNaN(price) || price < 0){
+    markField("newPrice", "Must be 0 or more");
+    bad.push("newPrice");
+  }
+
+  // Blank cost and stock are fine and mean zero — but a value that was typed
+  // and can't be read is a mistake worth showing, not silently turning into 0.
+  const cost = costRaw === "" ? 0 : parseFloat(costRaw);
+  if(costRaw !== "" && (isNaN(cost) || cost < 0)){
+    markField("newCost", "Must be 0 or more");
+    bad.push("newCost");
+  }
+
+  const home = homeRaw === "" ? 0 : parseInt(homeRaw, 10);
+  if(homeRaw !== "" && (isNaN(home) || home < 0)){
+    markField("newHome", "Must be a whole number, 0 or more");
+    bad.push("newHome");
+  }
+
+  if(bad.length){
+    showToast(bad.length === 1 ? "Check the highlighted box" : "Check the highlighted boxes");
+    document.getElementById(bad[0]).focus();
+    return;
+  }
+
+  state.products.push({ id: uid(), name, price, cost, emoji, home, stand: 0 });
   saveState();
   document.getElementById("newName").value = "";
   document.getElementById("newPrice").value = "";
@@ -799,18 +860,22 @@ function buildApp(){
         <h3>Add a product</h3>
         <label>Name</label>
         <input type="text" id="newName" placeholder="Lemonade">
+        <div class="field-error" id="newNameErr"></div>
         <div class="two-col">
           <div>
             <label>Sell price</label>
             <input type="number" id="newPrice" step="0.25" min="0" placeholder="1.00">
+            <div class="field-error" id="newPriceErr"></div>
           </div>
           <div>
             <label>Cost to make/buy</label>
             <input type="number" id="newCost" step="0.05" min="0" placeholder="0.20">
+            <div class="field-error" id="newCostErr"></div>
           </div>
         </div>
         <label>Starting stock in storage</label>
         <input type="number" id="newHome" min="0" placeholder="10">
+        <div class="field-error" id="newHomeErr"></div>
         <label>Pick an icon</label>
         <div class="emoji-pick" id="emojiPick"></div>
         <button class="btn btn-pink btn-full" style="margin-top:14px;" onclick="addProduct()">Add product</button>
@@ -831,6 +896,18 @@ function buildApp(){
       d.classList.add("sel");
     };
     pick.appendChild(d);
+  });
+
+  // Clear a field's highlight as soon as it's being corrected, so the red
+  // doesn't linger while the kid is still typing the fix.
+  PRODUCT_FIELDS.forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.addEventListener("input", ()=>{
+      el.classList.remove("invalid");
+      const err = document.getElementById(id + "Err");
+      if(err){ err.textContent = ""; err.classList.remove("show"); }
+    });
   });
 
   document.querySelectorAll(".tab").forEach(b=>{
