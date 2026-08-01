@@ -230,6 +230,60 @@
   .stat-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:center;}
   .stat-card .num{font-family:'Baloo 2';font-size:19px;font-weight:800;}
   .stat-card .lab{font-size:11px;color:var(--plum-soft);margin-top:2px;}
+  .chip{
+    border:1px solid var(--line);background:#FFFEFA;
+    border-radius:999px;padding:6px 13px;
+    font-family:'Nunito';font-weight:800;font-size:13px;
+    color:var(--plum-soft);cursor:pointer;
+  }
+  .chip:active{transform:scale(0.95);}
+  /* input[type=number] above sets width:100%, so this needs to match its
+     specificity to keep the box narrow enough to sit beside the chips. */
+  input.qty-box{
+    width:62px;flex:none;text-align:center;
+    padding:8px 4px;border-radius:10px;
+    border:1px solid var(--line);
+    font-family:'Nunito';font-weight:800;font-size:15px;
+    background:#FFFEFA;
+  }
+  .restock-row{flex-direction:column;align-items:stretch;gap:10px;}
+  .restock-head{display:flex;align-items:center;gap:12px;}
+  .restock-controls{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}
+  .restock-controls .chip{flex:none;}
+  .restock-actions{display:flex;gap:8px;}
+  .restock-actions .btn{flex:1;}
+  .cart-qty{
+    min-width:30px;text-align:center;font-weight:800;
+    background:none;border:none;font-family:'Nunito';font-size:15px;
+    color:var(--plum);cursor:pointer;padding:2px 4px;border-radius:8px;
+  }
+  .cart-qty:active{background:#F3EFE3;}
+  .cart-x{background:#FDE9E9;color:var(--danger);}
+  .pad-overlay{
+    position:fixed;inset:0;z-index:60;
+    background:rgba(45,27,51,0.45);
+    display:flex;align-items:center;justify-content:center;padding:20px;
+  }
+  .pad-card{
+    background:var(--card);border-radius:22px;
+    padding:22px 20px;width:100%;max-width:320px;text-align:center;
+  }
+  .pad-emoji{font-size:44px;line-height:1;}
+  .pad-name{font-family:'Baloo 2';font-size:22px;font-weight:800;margin-top:6px;}
+  .pad-each{font-size:13px;color:var(--plum-soft);margin-top:2px;}
+  .pad-stepper{display:flex;align-items:center;justify-content:center;gap:16px;margin:16px 0 12px;}
+  .pad-big{
+    width:56px;height:56px;border-radius:50%;
+    background:#F3EFE3;border:none;color:var(--plum);
+    font-size:28px;font-weight:800;line-height:1;cursor:pointer;
+  }
+  .pad-big:active{transform:scale(0.94);}
+  .pad-count{font-family:'Baloo 2';font-size:38px;font-weight:800;min-width:66px;}
+  .pad-chips{display:flex;justify-content:center;gap:8px;flex-wrap:wrap;}
+  .pad-total{font-family:'Baloo 2';font-size:21px;font-weight:800;margin:14px 0 2px;}
+  .pad-avail{font-size:12px;color:var(--plum-soft);margin-bottom:14px;}
+  .pad-actions{display:flex;gap:10px;}
+  .pad-actions .btn{flex:1;}
 </style>
 </head>
 <body>
@@ -249,10 +303,13 @@
 <script>
 const STORAGE_KEY = "lemonade-stand-state";
 const EMOJI_CHOICES = ["🍋","🥤","🍬","🍫","🍪","🧃","🍭","🥨","🧋","🍩","🍇","🧁"];
+const QUICK_PICKS = [1, 2, 5, 10];
 let state = { products: [], sales: [] };
 let cart = {};
 let currentTab = "sell";
 let lastSale = null;
+let padProductId = null;
+let padQty = 1;
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
@@ -355,8 +412,11 @@ function renderSell(){
   const grid = document.getElementById("sellGrid");
   state.products.forEach(p=>{
     const inCart = cartQtyFor(p.id);
-    const available = p.stand - inCart;
-    const empty = available <= 0;
+    const unallocated = p.stand - inCart;
+    // Only truly out-of-stock products are disabled. A product whose whole
+    // stand quantity is already in the cart stays tappable so the pad can
+    // be reopened to lower the number.
+    const empty = p.stand <= 0;
     const div = document.createElement("div");
     div.className = "tile" + (empty ? " empty" : "");
     div.id = "tile-" + p.id;
@@ -365,26 +425,86 @@ function renderSell(){
       <div class="tile-emoji">${p.emoji}</div>
       <div class="tile-name">${p.name}</div>
       <div class="tile-price">${money(p.price)}</div>
-      <div class="tile-qty ${lowStockClass(available)}">${available} at stand</div>
+      <div class="tile-qty ${lowStockClass(unallocated)}">${unallocated} at stand</div>
     `;
-    div.onclick = ()=> addToCart(p.id);
+    div.onclick = ()=> openQtyPad(p.id);
     grid.appendChild(div);
   });
   renderCart();
+  renderQtyPad();
 }
 
-function addToCart(productId){
+function openQtyPad(productId){
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
-  const inCart = cartQtyFor(productId);
-  if(p.stand - inCart <= 0){
+  if(p.stand <= 0){
     showToast("None left at the stand — restock first");
     return;
   }
-  cart[productId] = inCart + 1;
+  padProductId = productId;
+  // Reopening on a product already in the cart edits that quantity
+  // rather than stacking a second entry on top of it.
+  padQty = Math.min(cartQtyFor(productId) || 1, p.stand);
+  renderQtyPad();
+}
+
+function closeQtyPad(){
+  padProductId = null;
+  renderQtyPad();
+}
+
+function padSetQty(n){
+  const p = state.products.find(x=>x.id===padProductId);
+  if(!p) return;
+  if(n > p.stand){
+    showToast("Only " + p.stand + " at the stand");
+    n = p.stand;
+  }
+  padQty = Math.max(0, n);
+  renderQtyPad();
+}
+
+function confirmQtyPad(){
+  const p = state.products.find(x=>x.id===padProductId);
+  if(!p){ closeQtyPad(); return; }
+  if(padQty <= 0) delete cart[padProductId];
+  else cart[padProductId] = padQty;
+  const id = padProductId;
+  padProductId = null;
   renderSell();
-  const tile = document.getElementById("tile-" + productId);
+  const tile = document.getElementById("tile-" + id);
   if(tile){ tile.classList.add("pop"); setTimeout(()=> tile.classList.remove("pop"), 350); }
+}
+
+function renderQtyPad(){
+  const host = document.getElementById("padHost");
+  if(!host) return;
+  if(!padProductId){ host.innerHTML = ""; return; }
+  const p = state.products.find(x=>x.id===padProductId);
+  if(!p){ host.innerHTML = ""; return; }
+  const inCart = cartQtyFor(p.id);
+  const chips = QUICK_PICKS.filter(n=> n <= p.stand)
+    .map(n=> `<button class="chip" onclick="padSetQty(${n})">${n}</button>`).join("");
+  host.innerHTML = `
+    <div class="pad-overlay" onclick="if(event.target===this) closeQtyPad()">
+      <div class="pad-card">
+        <div class="pad-emoji">${p.emoji}</div>
+        <div class="pad-name">${p.name}</div>
+        <div class="pad-each">${money(p.price)} each</div>
+        <div class="pad-stepper">
+          <button class="pad-big" onclick="padSetQty(${padQty - 1})">&minus;</button>
+          <span class="pad-count">${padQty}</span>
+          <button class="pad-big" onclick="padSetQty(${padQty + 1})">+</button>
+        </div>
+        <div class="pad-chips">${chips}</div>
+        <div class="pad-total">${money(p.price * padQty)}</div>
+        <div class="pad-avail">${p.stand} at the stand</div>
+        <div class="pad-actions">
+          <button class="btn btn-ghost" onclick="closeQtyPad()">Cancel</button>
+          <button class="btn btn-pink" onclick="confirmQtyPad()">${inCart > 0 ? "Update sale" : "Add to sale"}</button>
+        </div>
+      </div>
+    </div>`;
 }
 
 function changeCartQty(productId, delta){
@@ -396,6 +516,11 @@ function changeCartQty(productId, delta){
   if(next > p.stand) next = p.stand;
   if(next === 0) delete cart[productId];
   else cart[productId] = next;
+  renderSell();
+}
+
+function removeFromCart(productId){
+  delete cart[productId];
   renderSell();
 }
 
@@ -412,9 +537,10 @@ function renderCart(){
       <span style="font-size:18px;">${p.emoji}</span>
       <span class="name">${p.name}</span>
       <button class="btn btn-round" onclick="changeCartQty('${pid}',-1)">&minus;</button>
-      <span style="min-width:18px;text-align:center;font-weight:800;">${cart[pid]}</span>
+      <button class="cart-qty" onclick="openQtyPad('${pid}')" title="Tap to pick a number">${cart[pid]}</button>
       <button class="btn btn-round" onclick="changeCartQty('${pid}',1)">+</button>
       <span class="sub">${money(p.price * cart[pid])}</span>
+      <button class="btn btn-round cart-x" onclick="removeFromCart('${pid}')" title="Remove">&times;</button>
     </div>`;
   });
   area.innerHTML = `<div class="cart-card">
@@ -459,42 +585,75 @@ function renderRestock(){
   }
   wrap.innerHTML = "";
   state.products.forEach(p=>{
+    const chips = QUICK_PICKS
+      .map(n=> `<button class="chip" onclick="setRestockQty('${p.id}',${n})">${n}</button>`).join("");
     const row = document.createElement("div");
-    row.className = "row-card";
+    row.className = "row-card restock-row";
     row.innerHTML = `
-      <div class="row-emoji">${p.emoji}</div>
-      <div class="row-main">
-        <div class="row-name">${p.name}</div>
-        <div class="row-detail">Fridge: ${p.home} &nbsp;•&nbsp; Stand: ${p.stand}</div>
+      <div class="restock-head">
+        <div class="row-emoji">${p.emoji}</div>
+        <div class="row-main">
+          <div class="row-name">${p.name}</div>
+          <div class="row-detail">Storage: ${p.home} &nbsp;•&nbsp; Stand: ${p.stand}</div>
+        </div>
       </div>
-      <div class="row-actions">
-        <button class="btn btn-teal-outline" onclick="addHome('${p.id}')">+5 fridge</button>
-        <button class="btn btn-teal" onclick="moveToStand('${p.id}')">Move 1 &rarr;</button>
+      <div class="restock-controls">
+        <input type="number" class="qty-box" id="rq-${p.id}" value="1" min="1" step="1">
+        ${chips}
+      </div>
+      <div class="restock-actions">
+        <button class="btn btn-teal-outline" onclick="addHome('${p.id}')">Add to storage</button>
+        <button class="btn btn-teal" onclick="moveToStand('${p.id}')">Move to stand &rarr;</button>
       </div>
     `;
     wrap.appendChild(row);
   });
 }
 
+function setRestockQty(id, n){
+  const el = document.getElementById("rq-" + id);
+  if(el) el.value = n;
+}
+
+// Returns a positive integer from the row's quantity box, or null (having
+// already toasted) if the box is blank or nonsensical.
+function readRestockQty(id){
+  const el = document.getElementById("rq-" + id);
+  if(!el) return null;
+  const n = parseInt(el.value, 10);
+  if(isNaN(n) || n <= 0){
+    showToast("Type how many first");
+    return null;
+  }
+  return n;
+}
+
 function addHome(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
-  p.home += 5;
+  const n = readRestockQty(id);
+  if(n === null) return;
+  p.home += n;
   saveState();
   renderRestock();
-  showToast("Added 5 to the fridge");
+  showToast("Added " + n + " to storage");
 }
 
 function moveToStand(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
-  if(p.home <= 0){ showToast("None left in the fridge"); return; }
-  p.home -= 1;
-  p.stand += 1;
+  const n = readRestockQty(id);
+  if(n === null) return;
+  if(p.home <= 0){ showToast("None left in storage"); return; }
+  const moved = Math.min(n, p.home);
+  p.home -= moved;
+  p.stand += moved;
   saveState();
   renderRestock();
   renderSell();
-  showToast("Moved to the stand");
+  showToast(moved < n
+    ? "Only " + moved + " in storage — moved " + moved
+    : "Moved " + moved + " to the stand");
 }
 
 function renderSales(){
@@ -555,7 +714,7 @@ function renderSetup(){
         <div class="row-emoji">${p.emoji}</div>
         <div class="row-main">
           <div class="row-name">${p.name}</div>
-          <div class="row-detail">Sell ${money(p.price)} &nbsp;•&nbsp; Cost ${money(p.cost)} &nbsp;•&nbsp; Fridge ${p.home} / Stand ${p.stand}</div>
+          <div class="row-detail">Sell ${money(p.price)} &nbsp;•&nbsp; Cost ${money(p.cost)} &nbsp;•&nbsp; Storage ${p.home} / Stand ${p.stand}</div>
         </div>
         <div class="row-actions">
           <button class="btn btn-danger" onclick="removeProduct('${p.id}')">Remove</button>
@@ -613,7 +772,7 @@ function buildApp(){
     <div class="topbar">
       <div>
         <h1>Lemonade Stand</h1>
-        <div class="sub">Tap to add to the sale. Track the fridge and the stand.</div>
+        <div class="sub">Tap to add to the sale. Track storage and the stand.</div>
       </div>
     </div>
     <div id="jarBox"></div>
@@ -623,7 +782,7 @@ function buildApp(){
     </section>
 
     <section id="sec-restock">
-      <div class="section-title">Move stock from the fridge to the stand</div>
+      <div class="section-title">Move stock from storage to the stand</div>
       <div id="restockList"></div>
     </section>
 
@@ -646,7 +805,7 @@ function buildApp(){
             <input type="number" id="newCost" step="0.05" min="0" placeholder="0.20">
           </div>
         </div>
-        <label>Starting stock in the fridge</label>
+        <label>Starting stock in storage</label>
         <input type="number" id="newHome" min="0" placeholder="10">
         <label>Pick an icon</label>
         <div class="emoji-pick" id="emojiPick"></div>
@@ -655,6 +814,8 @@ function buildApp(){
       <div class="section-title">Your products</div>
       <div id="setupList"></div>
     </section>
+
+    <div id="padHost"></div>
   `;
   const pick = document.getElementById("emojiPick");
   EMOJI_CHOICES.forEach((e,i)=>{
@@ -670,6 +831,10 @@ function buildApp(){
 
   document.querySelectorAll(".tab").forEach(b=>{
     b.onclick = ()=> switchTab(b.dataset.tab);
+  });
+
+  document.addEventListener("keydown", e=>{
+    if(e.key === "Escape" && padProductId) closeQtyPad();
   });
 
   renderTop();
