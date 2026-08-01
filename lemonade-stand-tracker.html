@@ -356,6 +356,8 @@
 
 <script>
 const STORAGE_KEY = "lemonade-stand-state";
+const DEFAULT_STAND_NAME = "Lemonade Stand";
+const MAX_STAND_NAME = 40;
 // Letters and numbers are plain characters rather than the boxed-letter
 // emoji, which render inconsistently (and pair up into flags) across
 // platforms. Styled at the same size they read as deliberate icons.
@@ -371,7 +373,7 @@ const EMOJI_CHOICES = ICON_GROUPS.reduce((all, g)=> all.concat(g.icons), []);
 const QUICK_PICKS = [1, 2, 5, 10];
 const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
 const EDIT_FIELDS = ["edName", "edPrice", "edCost", "edHome", "edStand"];
-let state = { products: [], sales: [], settings: { qr: null } };
+let state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME } };
 let cart = {};
 let currentTab = "sell";
 let lastSale = null;
@@ -406,13 +408,25 @@ function loadState(){
       state.products.forEach(p=>{ if(typeof p.cost !== "number") p.cost = 0; });
     }
   }catch(e){
-    state = { products: [], sales: [], settings: { qr: null } };
+    state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME } };
   }
   // Data saved before settings existed has no settings key.
   if(!state.products) state.products = [];
   if(!state.sales) state.sales = [];
-  if(!state.settings) state.settings = { qr: null };
+  if(!state.settings) state.settings = {};
   if(typeof state.settings.qr === "undefined") state.settings.qr = null;
+  if(!state.settings.name) state.settings.name = DEFAULT_STAND_NAME;
+}
+
+function standName(){
+  return state.settings.name || DEFAULT_STAND_NAME;
+}
+
+function renderHeader(){
+  const h = document.getElementById("standName");
+  // textContent, not innerHTML — the name is free text typed by the user.
+  if(h) h.textContent = standName();
+  document.title = standName();
 }
 
 // Returns false when the write failed, so callers that just grew the state
@@ -1098,6 +1112,18 @@ function renderSettings(){
   const qr = state.settings.qr;
   wrap.innerHTML = `
     <div class="form-card">
+      <h3>Stand name</h3>
+      <div class="danger-note">
+        Shows at the top of every screen and as the browser tab title.
+      </div>
+      <label>Name</label>
+      <input type="text" id="standNameInput" maxlength="${MAX_STAND_NAME}"
+             value="${escapeHtml(standName())}" placeholder="${DEFAULT_STAND_NAME}">
+      <div class="field-error" id="standNameInputErr"></div>
+      <button class="btn btn-pink btn-full" style="margin-top:12px;" onclick="saveStandName()">Save name</button>
+    </div>
+
+    <div class="form-card">
       <h3>Payment code</h3>
       <div class="danger-note">
         Upload the QR code from your payment app so customers can scan it to pay.
@@ -1178,6 +1204,24 @@ function handleQrFile(input){
   reader.readAsDataURL(file);
 }
 
+function saveStandName(){
+  clearFieldErrors(["standNameInput"]);
+  const el = document.getElementById("standNameInput");
+  const name = el.value.trim();
+  if(!name){
+    markField("standNameInput", "Give your stand a name");
+    showToast("Check the highlighted box");
+    el.focus();
+    return;
+  }
+  // maxlength only limits typing, so the cap is enforced here as well.
+  state.settings.name = name.slice(0, MAX_STAND_NAME);
+  saveState();
+  renderHeader();
+  renderSettings();
+  showToast("Name saved");
+}
+
 function removeQr(){
   state.settings.qr = null;
   saveState();
@@ -1206,14 +1250,17 @@ function closePaymentCode(){
 }
 
 function resetAllData(){
-  if(!confirm("Delete all products, sales, and the payment code?\n\nThis cannot be undone.")) return;
+  if(!confirm("Delete all products, sales, the payment code, and the stand name?\n\nThis cannot be undone.")) return;
   try{
     localStorage.removeItem(STORAGE_KEY);
   }catch(e){ /* clearing a key that isn't there is not a failure */ }
-  state = { products: [], sales: [], settings: { qr: null } };
+  state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME } };
   cart = {};
   padProductId = null;
+  editingProductId = null;
+  editEmoji = null;
   closePaymentCode();
+  renderHeader();
   renderTop();
   renderSell(); renderRestock(); renderSales(); renderSetup(); renderSettings();
   showToast("All data cleared");
@@ -1239,7 +1286,7 @@ function buildApp(){
   app.innerHTML = `
     <div class="topbar">
       <div>
-        <h1>Lemonade Stand</h1>
+        <h1 id="standName"></h1>
         <div class="sub">Tap to add to the sale. Track storage and the stand.</div>
       </div>
     </div>
@@ -1329,11 +1376,13 @@ function buildApp(){
     closePaymentCode();
   });
 
+  renderHeader();
   renderTop();
   renderSell();
   renderRestock();
   renderSales();
   renderSetup();
+  renderSettings();
 }
 
 (function init(){
