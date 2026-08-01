@@ -113,6 +113,16 @@
     cursor:pointer;padding:0;
   }
   .search-clear.show{display:block;}
+  .sort-bar{display:flex;align-items:center;gap:6px;margin:-4px 0 12px;}
+  .sort-label{font-size:12px;font-weight:800;color:var(--plum-soft);margin-right:2px;}
+  .sort-btn{
+    border:1px solid var(--line);background:#FFFEFA;
+    border-radius:999px;padding:5px 12px;
+    font-family:'Nunito';font-weight:800;font-size:12.5px;
+    color:var(--plum-soft);cursor:pointer;
+  }
+  .sort-btn:active{transform:scale(0.95);}
+  .sort-btn.active{background:#FFF3D6;border-color:var(--lemon-dark);color:var(--lemon-dark);}
   .row-card{
     background:var(--card);
     border:1px solid var(--line);
@@ -427,7 +437,7 @@ const EMOJI_CHOICES = ICON_GROUPS.reduce((all, g)=> all.concat(g.icons), []);
 const QUICK_PICKS = [1, 2, 5, 10];
 const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
 const EDIT_FIELDS = ["edName", "edPrice", "edCost", "edHome", "edStand"];
-let state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME } };
+let state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME, sellSort: "name" } };
 let cart = {};
 let currentTab = "sell";
 let padProductId = null;
@@ -461,7 +471,7 @@ function loadState(){
       state.products.forEach(p=>{ if(typeof p.cost !== "number") p.cost = 0; });
     }
   }catch(e){
-    state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME } };
+    state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME, sellSort: "name" } };
   }
   // Data saved before settings existed has no settings key.
   if(!state.products) state.products = [];
@@ -469,6 +479,7 @@ function loadState(){
   if(!state.settings) state.settings = {};
   if(typeof state.settings.qr === "undefined") state.settings.qr = null;
   if(!state.settings.name) state.settings.name = DEFAULT_STAND_NAME;
+  if(state.settings.sellSort !== "stock") state.settings.sellSort = "name";
 }
 
 function standName(){
@@ -564,12 +575,28 @@ function renderTop(){
 
 function lowStockClass(qty){ return qty <= 2 ? "low" : ""; }
 
+function byName(a, b){
+  return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
+}
+
 // Sorts a copy so the stored order stays as-entered. Case-insensitive, and
 // numeric so "Cup 2" comes before "Cup 10" rather than after it.
 function productsByName(){
-  return state.products.slice().sort((a, b)=>
-    a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
-  );
+  return state.products.slice().sort(byName);
+}
+
+// "stock" puts the most plentiful first, so whatever there's most of to sell
+// is nearest the top. Ties fall back to name, so equal counts don't shuffle
+// around unpredictably between renders.
+function sortedProducts(mode){
+  if(mode !== "stock") return productsByName();
+  return state.products.slice().sort((a, b)=> (b.stand - a.stand) || byName(a, b));
+}
+
+function setSellSort(mode){
+  state.settings.sellSort = (mode === "stock") ? "stock" : "name";
+  saveState();
+  renderSell();
 }
 
 // The search inputs are static markup outside the containers that get
@@ -597,21 +624,26 @@ function clearSearch(which){
   if(input) input.focus();
 }
 
-// Products matching the given tab's search, already alphabetised. `keepId`
-// survives the filter regardless — used so an open edit form doesn't vanish
-// when the text no longer matches what's being typed into the name field.
+// Products matching the given tab's search, in that tab's sort order.
+// `keepId` survives the filter regardless — used so an open edit form doesn't
+// vanish when the text no longer matches what's being typed into the name field.
 function visibleProducts(which, keepId){
   const q = searchQuery[which].trim().toLowerCase();
-  const all = productsByName();
+  const all = (which === "sell") ? sortedProducts(state.settings.sellSort) : productsByName();
   if(!q) return all;
   return all.filter(p=> p.id === keepId || p.name.toLowerCase().indexOf(q) !== -1);
 }
 
-// Hides the search box when there's nothing to search through.
+// Hides the search and sort controls when there's nothing to search through.
 function syncSearchVisibility(){
   ["sell", "setup"].forEach(which=>{
     const wrap = document.getElementById(which + "SearchWrap");
     if(wrap) wrap.style.display = state.products.length ? "" : "none";
+  });
+  const bar = document.getElementById("sellSortBar");
+  if(bar) bar.style.display = state.products.length ? "" : "none";
+  document.querySelectorAll("#sellSortBar .sort-btn").forEach(b=>{
+    b.classList.toggle("active", b.dataset.sort === state.settings.sellSort);
   });
 }
 
@@ -1422,7 +1454,7 @@ function resetAllData(){
   try{
     localStorage.removeItem(STORAGE_KEY);
   }catch(e){ /* clearing a key that isn't there is not a failure */ }
-  state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME } };
+  state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME, sellSort: "name" } };
   cart = {};
   padProductId = null;
   editingProductId = null;
@@ -1466,6 +1498,11 @@ function buildApp(){
         <input type="text" id="sellSearch" placeholder="Search products"
                autocomplete="off" oninput="onSearch('sell', this.value)">
         <button class="search-clear" id="sellSearchClear" onclick="clearSearch('sell')" title="Clear">&times;</button>
+      </div>
+      <div class="sort-bar" id="sellSortBar">
+        <span class="sort-label">Sort</span>
+        <button class="sort-btn" data-sort="name" onclick="setSellSort('name')">A&ndash;Z</button>
+        <button class="sort-btn" data-sort="stock" onclick="setSellSort('stock')">Most left</button>
       </div>
       <div id="sellTiles"></div>
     </section>
