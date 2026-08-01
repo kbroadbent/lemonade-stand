@@ -384,12 +384,17 @@ function jarSvg(pct){
   </svg>`;
 }
 
+// The jar and the running money totals live on the Sales tab only — the
+// selling view stays focused on what's in stock and what's in the cart.
 function renderTop(){
+  const box = document.getElementById("jarBox");
+  if(!box) return;
+  if(currentTab !== "sales"){ box.innerHTML = ""; return; }
   const rev = totalRevenue();
   const profit = totalProfit();
   const goal = 100;
   const pct = rev / goal;
-  document.getElementById("jarBox").innerHTML = `
+  box.innerHTML = `
     <div class="jar-wrap">
       ${jarSvg(pct)}
       <div class="jar-stats">
@@ -760,6 +765,7 @@ function switchTab(tab){
   document.querySelectorAll(".tab").forEach(b=>{
     b.classList.toggle("active", b.dataset.tab === tab);
   });
+  renderTop();
   if(tab==="sell") renderSell();
   if(tab==="restock") renderRestock();
   if(tab==="sales") renderSales();
