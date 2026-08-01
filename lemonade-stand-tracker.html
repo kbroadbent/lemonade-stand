@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lemonade Stand Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@500;700;800&family=Nunito:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --lemon:#F5C518;
+    --lemon-dark:#C79E0F;
+    --pink:#FF6F91;
+    --pink-dark:#D6486A;
+    --teal:#1FA895;
+    --teal-dark:#12786A;
+    --cream:#FFFDF6;
+    --card:#FFFFFF;
+    --plum:#2D1B33;
+    --plum-soft:#6B5C71;
+    --line:#EDE6D3;
+    --danger:#E24B4A;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--cream);
+    font-family:'Nunito',sans-serif;
+    color:var(--plum);
+    padding-bottom:88px;
+  }
+  h1,h2,h3,.display{font-family:'Baloo 2',cursive;}
+  .app{max-width:520px;margin:0 auto;padding:20px 16px 8px;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;}
+  .topbar h1{font-size:22px;margin:0;color:var(--plum);}
+  .topbar .sub{font-size:13px;color:var(--plum-soft);margin-top:2px;}
+  .jar-wrap{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:20px;
+    padding:16px;
+    display:flex;
+    align-items:center;
+    gap:16px;
+    margin-bottom:18px;
+  }
+  .jar-svg{flex:none;}
+  .jar-stats{flex:1;}
+  .jar-total{font-family:'Baloo 2';font-size:32px;font-weight:800;color:var(--plum);line-height:1;}
+  .jar-label{font-size:13px;color:var(--plum-soft);margin-top:2px;}
+  .jar-sub{font-size:12px;color:var(--plum-soft);margin-top:8px;}
+  section{display:none;}
+  section.active{display:block;}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+  .tile{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:18px;
+    padding:16px 14px;
+    text-align:left;
+    cursor:pointer;
+    display:flex;
+    flex-direction:column;
+    gap:6px;
+    user-select:none;
+    transition:transform .08s ease;
+    position:relative;
+  }
+  .tile:active{transform:scale(0.96);}
+  .tile.empty{opacity:0.45;cursor:not-allowed;}
+  .tile-emoji{font-size:34px;}
+  .tile-name{font-family:'Baloo 2';font-size:17px;font-weight:700;}
+  .tile-price{font-size:14px;color:var(--plum-soft);}
+  .tile-qty{
+    align-self:flex-start;
+    font-size:12px;
+    font-weight:700;
+    padding:3px 10px;
+    border-radius:999px;
+    background:#FFF3D6;
+    color:var(--lemon-dark);
+  }
+  .tile-qty.low{background:#FFE1E1;color:var(--danger);}
+  .tile-cart-badge{
+    position:absolute;top:10px;right:10px;
+    background:var(--pink);color:#fff;
+    font-size:12px;font-weight:800;
+    min-width:22px;height:22px;border-radius:11px;
+    display:flex;align-items:center;justify-content:center;
+    padding:0 6px;
+  }
+  .tile.pop{animation:pop .35s ease;}
+  @keyframes pop{
+    0%{transform:scale(1);}
+    35%{transform:scale(0.92);background:#FFF7E0;}
+    100%{transform:scale(1);}
+  }
+  .section-title{font-size:15px;color:var(--plum-soft);margin:18px 0 10px;font-weight:700;}
+  .row-card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:14px;
+    display:flex;
+    align-items:center;
+    gap:12px;
+    margin-bottom:10px;
+  }
+  .row-emoji{font-size:28px;flex:none;}
+  .row-main{flex:1;min-width:0;}
+  .row-name{font-family:'Baloo 2';font-weight:700;font-size:16px;}
+  .row-detail{font-size:12.5px;color:var(--plum-soft);margin-top:2px;}
+  .row-actions{display:flex;gap:6px;flex:none;align-items:center;}
+  .btn{
+    border:none;
+    border-radius:12px;
+    font-family:'Nunito';
+    font-weight:800;
+    font-size:13px;
+    padding:9px 12px;
+    cursor:pointer;
+  }
+  .btn:active{transform:scale(0.95);}
+  .btn-teal{background:var(--teal);color:#fff;}
+  .btn-teal-outline{background:#E7F7F4;color:var(--teal-dark);}
+  .btn-pink{background:var(--pink);color:#fff;}
+  .btn-ghost{background:#F3EFE3;color:var(--plum-soft);}
+  .btn-danger{background:#FDE9E9;color:var(--danger);}
+  .btn-full{width:100%;}
+  .btn-round{
+    width:30px;height:30px;border-radius:50%;
+    background:#F3EFE3;color:var(--plum);
+    font-weight:800;font-size:16px;line-height:1;
+    display:flex;align-items:center;justify-content:center;
+    padding:0;
+  }
+  .form-card{
+    background:var(--card);
+    border:1px solid var(--line);
+    border-radius:16px;
+    padding:16px;
+    margin-bottom:16px;
+  }
+  .form-card h3{margin:0 0 12px;font-size:17px;}
+  label{display:block;font-size:12.5px;font-weight:700;color:var(--plum-soft);margin:10px 0 4px;}
+  input[type=text],input[type=number]{
+    width:100%;
+    padding:10px 12px;
+    border-radius:10px;
+    border:1px solid var(--line);
+    font-family:'Nunito';
+    font-size:15px;
+    background:#FFFEFA;
+  }
+  input:focus{outline:2px solid var(--lemon);border-color:transparent;}
+  .two-col{display:grid;grid-template-columns:1fr 1fr;gap:10px;}
+  .emoji-pick{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
+  .emoji-opt{
+    font-size:22px;
+    padding:6px 9px;
+    border-radius:10px;
+    border:1px solid var(--line);
+    background:#FFFEFA;
+    cursor:pointer;
+  }
+  .emoji-opt.sel{border-color:var(--lemon-dark);background:#FFF3D6;}
+  .tabbar{
+    position:fixed;bottom:0;left:0;right:0;
+    background:var(--card);
+    border-top:1px solid var(--line);
+    display:flex;
+    padding:8px 10px calc(8px + env(safe-area-inset-bottom));
+    max-width:520px;margin:0 auto;
+  }
+  .tab{
+    flex:1;
+    text-align:center;
+    background:none;border:none;
+    font-family:'Nunito';font-weight:800;
+    font-size:12px;
+    color:var(--plum-soft);
+    padding:8px 4px;
+    border-radius:12px;
+    cursor:pointer;
+  }
+  .tab .ic{display:block;font-size:20px;margin-bottom:2px;}
+  .tab.active{color:var(--pink-dark);background:#FFEFF3;}
+  .empty-msg{
+    text-align:center;color:var(--plum-soft);
+    padding:30px 10px;font-size:14px;
+  }
+  .sale-log-item{
+    padding:10px 0;border-bottom:1px solid var(--line);font-size:14px;
+  }
+  .sale-log-item:last-child{border-bottom:none;}
+  .sale-log-top{display:flex;justify-content:space-between;align-items:baseline;}
+  .sale-time{color:var(--plum-soft);font-size:11.5px;}
+  .sale-items{color:var(--plum-soft);font-size:12.5px;margin-top:2px;}
+  .cart-card{
+    background:var(--card);
+    border:2px solid var(--pink);
+    border-radius:16px;
+    padding:14px;
+    margin-bottom:16px;
+    position:sticky;
+    bottom:74px;
+  }
+  .cart-row{
+    display:flex;align-items:center;gap:10px;
+    padding:6px 0;
+  }
+  .cart-row .name{flex:1;font-size:14px;font-weight:700;}
+  .cart-row .sub{font-size:12.5px;color:var(--plum-soft);min-width:56px;text-align:right;}
+  .cart-total{
+    display:flex;justify-content:space-between;align-items:baseline;
+    border-top:1px solid var(--line);
+    margin-top:8px;padding-top:10px;
+  }
+  .cart-total .amt{font-family:'Baloo 2';font-size:22px;font-weight:800;}
+  .toast{
+    position:fixed;top:16px;left:50%;transform:translateX(-50%);
+    background:var(--plum);color:#fff;padding:10px 18px;border-radius:999px;
+    font-size:13px;font-weight:700;opacity:0;pointer-events:none;
+    transition:opacity .25s ease, top .25s ease;
+    z-index:50;
+  }
+  .toast.show{opacity:1;top:26px;}
+  .loading{text-align:center;padding:60px 20px;color:var(--plum-soft);}
+  .stat-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-bottom:16px;}
+  .stat-card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 10px;text-align:center;}
+  .stat-card .num{font-family:'Baloo 2';font-size:19px;font-weight:800;}
+  .stat-card .lab{font-size:11px;color:var(--plum-soft);margin-top:2px;}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="loading" id="loading">Filling the pitcher...</div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<div class="tabbar" id="tabbar" style="display:none;">
+  <button class="tab" data-tab="sell"><span class="ic">&#127866;</span>Sell</button>
+  <button class="tab" data-tab="restock"><span class="ic">&#128257;</span>Restock</button>
+  <button class="tab" data-tab="sales"><span class="ic">&#128203;</span>Sales</button>
+  <button class="tab" data-tab="setup"><span class="ic">&#9881;</span>Products</button>
+</div>
+
+<script>
+const STORAGE_KEY = "lemonade-stand-state";
+const EMOJI_CHOICES = ["🍋","🥤","🍬","🍫","🍪","🧃","🍭","🥨","🧋","🍩","🍇","🧁"];
+let state = { products: [], sales: [] };
+let cart = {};
+let currentTab = "sell";
+let lastSale = null;
+
+function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
+
+function money(n){
+  return "$" + (Math.round(n * 100) / 100).toLocaleString(undefined, {minimumFractionDigits:2, maximumFractionDigits:2});
+}
+
+function loadState(){
+  try{
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if(raw){
+      state = JSON.parse(raw);
+      state.products.forEach(p=>{ if(typeof p.cost !== "number") p.cost = 0; });
+    }
+  }catch(e){
+    state = { products: [], sales: [] };
+  }
+}
+
+function saveState(){
+  try{
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  }catch(e){
+    showToast("Couldn't save — try again");
+  }
+}
+
+function showToast(msg){
+  const t = document.getElementById("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(()=> t.classList.remove("show"), 1400);
+}
+
+function totalRevenue(){
+  return state.sales.reduce((s,x)=> s + x.revenue, 0);
+}
+function totalCost(){
+  return state.sales.reduce((s,x)=> s + x.cost, 0);
+}
+function totalProfit(){
+  return totalRevenue() - totalCost();
+}
+function totalItemsSold(){
+  return state.sales.reduce((s,x)=> s + x.items.reduce((a,i)=>a+i.qty,0), 0);
+}
+
+function cartQtyFor(productId){ return cart[productId] || 0; }
+function cartCount(){ return Object.values(cart).reduce((a,b)=>a+b,0); }
+function cartTotal(){
+  let t = 0;
+  Object.keys(cart).forEach(pid=>{
+    const p = state.products.find(x=>x.id===pid);
+    if(p) t += p.price * cart[pid];
+  });
+  return t;
+}
+
+function jarSvg(pct){
+  pct = Math.max(0, Math.min(1, pct));
+  const fillH = 66 * pct;
+  const fillY = 10 + (66 - fillH);
+  return `
+  <svg class="jar-svg" width="64" height="84" viewBox="0 0 64 84" xmlns="http://www.w3.org/2000/svg">
+    <rect x="14" y="2" width="36" height="10" rx="3" fill="#E8CB6A"/>
+    <path d="M10 12 h44 l-5 66 a6 6 0 0 1-6 6 h-22 a6 6 0 0 1-6-6 z" fill="#FFFDF6" stroke="#E8D9A8" stroke-width="2"/>
+    <clipPath id="jarclip"><path d="M11 13 h42 l-4.7 64 a5 5 0 0 1-5 4.5 h-22.6 a5 5 0 0 1-5-4.5 z"/></clipPath>
+    <g clip-path="url(#jarclip)">
+      <rect x="8" y="${fillY}" width="48" height="80" fill="#F5C518"/>
+    </g>
+  </svg>`;
+}
+
+function renderTop(){
+  const rev = totalRevenue();
+  const profit = totalProfit();
+  const goal = 100;
+  const pct = rev / goal;
+  document.getElementById("jarBox").innerHTML = `
+    <div class="jar-wrap">
+      ${jarSvg(pct)}
+      <div class="jar-stats">
+        <div class="jar-total">${money(rev)}</div>
+        <div class="jar-label">total earned &nbsp;•&nbsp; ${money(profit)} profit</div>
+        <div class="jar-sub">${totalItemsSold()} items sold</div>
+      </div>
+    </div>`;
+}
+
+function lowStockClass(qty){ return qty <= 2 ? "low" : ""; }
+
+function renderSell(){
+  const wrap = document.getElementById("sellTiles");
+  if(state.products.length === 0){
+    wrap.innerHTML = `<div class="empty-msg">No products yet. Add one in the Products tab to start selling.</div>`;
+    return;
+  }
+  wrap.innerHTML = `<div class="grid" id="sellGrid"></div><div id="cartArea"></div>`;
+  const grid = document.getElementById("sellGrid");
+  state.products.forEach(p=>{
+    const inCart = cartQtyFor(p.id);
+    const available = p.stand - inCart;
+    const empty = available <= 0;
+    const div = document.createElement("div");
+    div.className = "tile" + (empty ? " empty" : "");
+    div.id = "tile-" + p.id;
+    div.innerHTML = `
+      ${inCart > 0 ? `<div class="tile-cart-badge">${inCart}</div>` : ""}
+      <div class="tile-emoji">${p.emoji}</div>
+      <div class="tile-name">${p.name}</div>
+      <div class="tile-price">${money(p.price)}</div>
+      <div class="tile-qty ${lowStockClass(available)}">${available} at stand</div>
+    `;
+    div.onclick = ()=> addToCart(p.id);
+    grid.appendChild(div);
+  });
+  renderCart();
+}
+
+function addToCart(productId){
+  const p = state.products.find(x=>x.id===productId);
+  if(!p) return;
+  const inCart = cartQtyFor(productId);
+  if(p.stand - inCart <= 0){
+    showToast("None left at the stand — restock first");
+    return;
+  }
+  cart[productId] = inCart + 1;
+  renderSell();
+  const tile = document.getElementById("tile-" + productId);
+  if(tile){ tile.classList.add("pop"); setTimeout(()=> tile.classList.remove("pop"), 350); }
+}
+
+function changeCartQty(productId, delta){
+  const cur = cartQtyFor(productId);
+  let next = cur + delta;
+  const p = state.products.find(x=>x.id===productId);
+  if(!p) return;
+  if(next < 0) next = 0;
+  if(next > p.stand) next = p.stand;
+  if(next === 0) delete cart[productId];
+  else cart[productId] = next;
+  renderSell();
+}
+
+function renderCart(){
+  const area = document.getElementById("cartArea");
+  if(!area) return;
+  const count = cartCount();
+  if(count === 0){ area.innerHTML = ""; return; }
+  let rows = "";
+  Object.keys(cart).forEach(pid=>{
+    const p = state.products.find(x=>x.id===pid);
+    if(!p) return;
+    rows += `<div class="cart-row">
+      <span style="font-size:18px;">${p.emoji}</span>
+      <span class="name">${p.name}</span>
+      <button class="btn btn-round" onclick="changeCartQty('${pid}',-1)">&minus;</button>
+      <span style="min-width:18px;text-align:center;font-weight:800;">${cart[pid]}</span>
+      <button class="btn btn-round" onclick="changeCartQty('${pid}',1)">+</button>
+      <span class="sub">${money(p.price * cart[pid])}</span>
+    </div>`;
+  });
+  area.innerHTML = `<div class="cart-card">
+    ${rows}
+    <div class="cart-total">
+      <span>${count} item${count===1?"":"s"}</span>
+      <span class="amt">${money(cartTotal())}</span>
+    </div>
+    <button class="btn btn-pink btn-full" style="margin-top:10px;" onclick="completeSale()">Complete sale</button>
+  </div>`;
+}
+
+function completeSale(){
+  const count = cartCount();
+  if(count === 0) return;
+  const items = [];
+  let revenue = 0, cost = 0;
+  Object.keys(cart).forEach(pid=>{
+    const p = state.products.find(x=>x.id===pid);
+    if(!p) return;
+    const qty = cart[pid];
+    p.stand -= qty;
+    revenue += p.price * qty;
+    cost += p.cost * qty;
+    items.push({ productId: p.id, name: p.name, emoji: p.emoji, qty, price: p.price, cost: p.cost });
+  });
+  const sale = { id: uid(), items, revenue, cost, profit: revenue - cost, time: Date.now() };
+  state.sales.push(sale);
+  lastSale = sale;
+  cart = {};
+  saveState();
+  renderSell();
+  renderTop();
+  showToast("Sale recorded: " + money(revenue));
+}
+
+function renderRestock(){
+  const wrap = document.getElementById("restockList");
+  if(state.products.length === 0){
+    wrap.innerHTML = `<div class="empty-msg">Add a product first in the Products tab.</div>`;
+    return;
+  }
+  wrap.innerHTML = "";
+  state.products.forEach(p=>{
+    const row = document.createElement("div");
+    row.className = "row-card";
+    row.innerHTML = `
+      <div class="row-emoji">${p.emoji}</div>
+      <div class="row-main">
+        <div class="row-name">${p.name}</div>
+        <div class="row-detail">Fridge: ${p.home} &nbsp;•&nbsp; Stand: ${p.stand}</div>
+      </div>
+      <div class="row-actions">
+        <button class="btn btn-teal-outline" onclick="addHome('${p.id}')">+5 fridge</button>
+        <button class="btn btn-teal" onclick="moveToStand('${p.id}')">Move 1 &rarr;</button>
+      </div>
+    `;
+    wrap.appendChild(row);
+  });
+}
+
+function addHome(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  p.home += 5;
+  saveState();
+  renderRestock();
+  showToast("Added 5 to the fridge");
+}
+
+function moveToStand(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  if(p.home <= 0){ showToast("None left in the fridge"); return; }
+  p.home -= 1;
+  p.stand += 1;
+  saveState();
+  renderRestock();
+  renderSell();
+  showToast("Moved to the stand");
+}
+
+function renderSales(){
+  const wrap = document.getElementById("salesList");
+  const rev = totalRevenue();
+  const cost = totalCost();
+  const profit = totalProfit();
+  let byProduct = {};
+  state.sales.forEach(s=>{
+    s.items.forEach(it=>{
+      byProduct[it.name] = byProduct[it.name] || { emoji: it.emoji, qty:0, revenue:0, cost:0 };
+      byProduct[it.name].qty += it.qty;
+      byProduct[it.name].revenue += it.price * it.qty;
+      byProduct[it.name].cost += it.cost * it.qty;
+    });
+  });
+  let statsHtml = `<div class="stat-grid">
+      <div class="stat-card"><div class="num">${money(rev)}</div><div class="lab">revenue</div></div>
+      <div class="stat-card"><div class="num">${money(cost)}</div><div class="lab">cost</div></div>
+      <div class="stat-card"><div class="num">${money(profit)}</div><div class="lab">profit</div></div>
+    </div>`;
+  let breakdownHtml = "";
+  const names = Object.keys(byProduct);
+  if(names.length){
+    breakdownHtml = names.map(n=>{
+      const d = byProduct[n];
+      const prof = d.revenue - d.cost;
+      return `<div class="row-card"><div class="row-emoji">${d.emoji}</div><div class="row-main"><div class="row-name">${n}</div><div class="row-detail">${d.qty} sold &nbsp;•&nbsp; ${money(prof)} profit</div></div><div class="row-name">${money(d.revenue)}</div></div>`;
+    }).join("");
+  }
+  let logHtml = "";
+  if(state.sales.length === 0){
+    logHtml = `<div class="empty-msg">No sales recorded yet.</div>`;
+  } else {
+    const recent = state.sales.slice().reverse().slice(0, 25);
+    logHtml = `<div class="form-card">` + recent.map(s=>{
+      const t = new Date(s.time);
+      const timeStr = t.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
+      const itemsStr = s.items.map(it=> `${it.qty}x ${it.emoji} ${it.name}`).join(", ");
+      return `<div class="sale-log-item">
+        <div class="sale-log-top"><span>${money(s.revenue)}</span><span class="sale-time">${timeStr}</span></div>
+        <div class="sale-items">${itemsStr}</div>
+      </div>`;
+    }).join("") + `</div>`;
+  }
+  wrap.innerHTML = statsHtml + `<div class="section-title">By product</div>` + breakdownHtml +
+    `<div class="section-title">Recent sales</div>` + logHtml;
+}
+
+function renderSetup(){
+  const wrap = document.getElementById("setupList");
+  let listHtml = "";
+  if(state.products.length === 0){
+    listHtml = `<div class="empty-msg">No products yet — add your first one below.</div>`;
+  } else {
+    listHtml = state.products.map(p=>`
+      <div class="row-card">
+        <div class="row-emoji">${p.emoji}</div>
+        <div class="row-main">
+          <div class="row-name">${p.name}</div>
+          <div class="row-detail">Sell ${money(p.price)} &nbsp;•&nbsp; Cost ${money(p.cost)} &nbsp;•&nbsp; Fridge ${p.home} / Stand ${p.stand}</div>
+        </div>
+        <div class="row-actions">
+          <button class="btn btn-danger" onclick="removeProduct('${p.id}')">Remove</button>
+        </div>
+      </div>`).join("");
+  }
+  wrap.innerHTML = listHtml;
+}
+
+function removeProduct(id){
+  state.products = state.products.filter(p=>p.id!==id);
+  delete cart[id];
+  saveState();
+  renderSetup(); renderSell(); renderRestock(); renderSales();
+  showToast("Product removed");
+}
+
+function addProduct(){
+  const name = document.getElementById("newName").value.trim();
+  const price = parseFloat(document.getElementById("newPrice").value);
+  const cost = parseFloat(document.getElementById("newCost").value || "0");
+  const home = parseInt(document.getElementById("newHome").value || "0", 10);
+  const emojiEl = document.querySelector(".emoji-opt.sel");
+  const emoji = emojiEl ? emojiEl.textContent : "🍋";
+  if(!name){ showToast("Give it a name first"); return; }
+  if(isNaN(price) || price < 0){ showToast("Enter a valid sell price"); return; }
+  state.products.push({ id: uid(), name, price, cost: isNaN(cost)?0:cost, emoji, home: isNaN(home)?0:home, stand: 0 });
+  saveState();
+  document.getElementById("newName").value = "";
+  document.getElementById("newPrice").value = "";
+  document.getElementById("newCost").value = "";
+  document.getElementById("newHome").value = "";
+  document.querySelectorAll(".emoji-opt").forEach(e=>e.classList.remove("sel"));
+  document.querySelector(".emoji-opt").classList.add("sel");
+  renderSetup(); renderSell(); renderRestock();
+  showToast("Product added");
+}
+
+function switchTab(tab){
+  currentTab = tab;
+  document.querySelectorAll("section").forEach(s=> s.classList.remove("active"));
+  document.getElementById("sec-" + tab).classList.add("active");
+  document.querySelectorAll(".tab").forEach(b=>{
+    b.classList.toggle("active", b.dataset.tab === tab);
+  });
+  if(tab==="sell") renderSell();
+  if(tab==="restock") renderRestock();
+  if(tab==="sales") renderSales();
+  if(tab==="setup") renderSetup();
+}
+
+function buildApp(){
+  const app = document.getElementById("app");
+  app.innerHTML = `
+    <div class="topbar">
+      <div>
+        <h1>Lemonade Stand</h1>
+        <div class="sub">Tap to add to the sale. Track the fridge and the stand.</div>
+      </div>
+    </div>
+    <div id="jarBox"></div>
+
+    <section id="sec-sell" class="active">
+      <div id="sellTiles"></div>
+    </section>
+
+    <section id="sec-restock">
+      <div class="section-title">Move stock from the fridge to the stand</div>
+      <div id="restockList"></div>
+    </section>
+
+    <section id="sec-sales">
+      <div id="salesList"></div>
+    </section>
+
+    <section id="sec-setup">
+      <div class="form-card">
+        <h3>Add a product</h3>
+        <label>Name</label>
+        <input type="text" id="newName" placeholder="Lemonade">
+        <div class="two-col">
+          <div>
+            <label>Sell price</label>
+            <input type="number" id="newPrice" step="0.25" min="0" placeholder="1.00">
+          </div>
+          <div>
+            <label>Cost to make/buy</label>
+            <input type="number" id="newCost" step="0.05" min="0" placeholder="0.20">
+          </div>
+        </div>
+        <label>Starting stock in the fridge</label>
+        <input type="number" id="newHome" min="0" placeholder="10">
+        <label>Pick an icon</label>
+        <div class="emoji-pick" id="emojiPick"></div>
+        <button class="btn btn-pink btn-full" style="margin-top:14px;" onclick="addProduct()">Add product</button>
+      </div>
+      <div class="section-title">Your products</div>
+      <div id="setupList"></div>
+    </section>
+  `;
+  const pick = document.getElementById("emojiPick");
+  EMOJI_CHOICES.forEach((e,i)=>{
+    const d = document.createElement("div");
+    d.className = "emoji-opt" + (i===0 ? " sel" : "");
+    d.textContent = e;
+    d.onclick = ()=>{
+      document.querySelectorAll(".emoji-opt").forEach(x=>x.classList.remove("sel"));
+      d.classList.add("sel");
+    };
+    pick.appendChild(d);
+  });
+
+  document.querySelectorAll(".tab").forEach(b=>{
+    b.onclick = ()=> switchTab(b.dataset.tab);
+  });
+
+  renderTop();
+  renderSell();
+  renderRestock();
+  renderSales();
+  renderSetup();
+}
+
+(function init(){
+  loadState();
+  buildApp();
+  document.getElementById("tabbar").style.display = "flex";
+  document.querySelector('.tab[data-tab="sell"]').classList.add("active");
+})();
+</script>
+</body>
+</html>
