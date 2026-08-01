@@ -224,6 +224,7 @@
   .sale-log-top{display:flex;justify-content:space-between;align-items:baseline;}
   .sale-time{color:var(--plum-soft);font-size:11.5px;}
   .sale-items{color:var(--plum-soft);font-size:12.5px;margin-top:2px;}
+  .undo-btn{margin-top:8px;padding:6px 12px;font-size:12px;}
   .cart-card{
     background:var(--card);
     border:2px solid var(--pink);
@@ -329,11 +330,30 @@
     border-radius:8px;background:#fff;cursor:pointer;
   }
   .qr-hint{font-size:12px;color:var(--plum-soft);margin-top:8px;}
-  .qr-full{
-    width:100%;max-width:260px;aspect-ratio:1;
-    object-fit:contain;background:#fff;
-    border-radius:12px;margin:8px 0 14px;
+  /* The payment code is held up for a customer to scan across a table, so it
+     takes the whole window rather than sitting in a centred card. */
+  .qr-screen{
+    position:fixed;inset:0;z-index:70;
+    background:#FFFFFF;
+    display:flex;flex-direction:column;
+    padding:16px calc(16px + env(safe-area-inset-left))
+           calc(16px + env(safe-area-inset-bottom))
+           calc(16px + env(safe-area-inset-right));
   }
+  .qr-screen-title{
+    font-family:'Baloo 2';font-size:24px;font-weight:800;
+    text-align:center;color:var(--plum);flex:none;
+  }
+  .qr-screen-body{
+    flex:1;min-height:0;
+    display:flex;align-items:center;justify-content:center;
+  }
+  .qr-screen-body img{
+    width:100%;height:100%;
+    object-fit:contain;
+    background:#fff;
+  }
+  .qr-screen .btn{flex:none;margin-top:12px;}
   .danger-card{border-color:#F3C9C9;}
   .danger-card h3{color:var(--danger);}
   .danger-note{font-size:12.5px;color:var(--plum-soft);margin-bottom:12px;line-height:1.45;}
@@ -376,7 +396,6 @@ const EDIT_FIELDS = ["edName", "edPrice", "edCost", "edHome", "edStand"];
 let state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME } };
 let cart = {};
 let currentTab = "sell";
-let lastSale = null;
 let padProductId = null;
 let padQty = 1;
 let editingProductId = null;
@@ -659,7 +678,10 @@ function renderCart(){
       <span class="amt">${money(cartTotal())}</span>
     </div>
     ${state.settings.qr ? `<button class="btn btn-teal-outline btn-full" style="margin-top:10px;" onclick="showPaymentCode()">Show payment code</button>` : ""}
-    <button class="btn btn-pink btn-full" style="margin-top:10px;" onclick="completeSale()">Complete sale</button>
+    <div class="pad-actions" style="margin-top:10px;">
+      <button class="btn btn-ghost" onclick="cancelSale()">Cancel sale</button>
+      <button class="btn btn-pink" style="flex:2;" onclick="completeSale()">Complete sale</button>
+    </div>
   </div>`;
 }
 
@@ -679,12 +701,45 @@ function completeSale(){
   });
   const sale = { id: uid(), items, revenue, cost, profit: revenue - cost, time: Date.now() };
   state.sales.push(sale);
-  lastSale = sale;
   cart = {};
   saveState();
   renderSell();
   renderTop();
   showToast("Sale recorded: " + money(revenue));
+}
+
+// Abandons the sale being built. Nothing has been saved or taken off the
+// stand yet, so this only throws away the cart.
+function cancelSale(){
+  const count = cartCount();
+  if(count === 0) return;
+  if(!confirm("Cancel this sale?\n\nThe " + count + " item" + (count===1?"":"s") + " in it will be cleared.")) return;
+  cart = {};
+  closePaymentCode();
+  renderSell();
+  showToast("Sale cancelled");
+}
+
+// Reverses the most recent completed sale, putting its items back on the
+// stand. Only the latest one, so the stock arithmetic stays easy to follow.
+function undoLastSale(){
+  if(state.sales.length === 0) return;
+  const sale = state.sales[state.sales.length - 1];
+  if(!confirm("Undo this sale of " + money(sale.revenue) + "?\n\nThe items go back to the stand.")) return;
+
+  state.sales.pop();
+  let missing = 0;
+  sale.items.forEach(it=>{
+    const p = state.products.find(x=>x.id === it.productId);
+    // A product deleted since the sale has nowhere to put the stock back.
+    if(p) p.stand += it.qty;
+    else missing++;
+  });
+
+  saveState();
+  renderTop();
+  renderSell(); renderRestock(); renderSales(); renderSetup();
+  showToast(missing ? "Sale undone — some products no longer exist" : "Sale undone");
 }
 
 function renderRestock(){
@@ -798,13 +853,16 @@ function renderSales(){
     logHtml = `<div class="empty-msg">No sales recorded yet.</div>`;
   } else {
     const recent = state.sales.slice().reverse().slice(0, 25);
-    logHtml = `<div class="form-card">` + recent.map(s=>{
+    logHtml = `<div class="form-card">` + recent.map((s, i)=>{
       const t = new Date(s.time);
       const timeStr = t.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
       const itemsStr = s.items.map(it=> `${it.qty}x ${it.emoji} ${escapeHtml(it.name)}`).join(", ");
+      // Only the newest sale can be undone — reversing an older one would
+      // mean unwinding the stock changes made after it.
       return `<div class="sale-log-item">
         <div class="sale-log-top"><span>${money(s.revenue)}</span><span class="sale-time">${timeStr}</span></div>
         <div class="sale-items">${itemsStr}</div>
+        ${i === 0 ? `<button class="btn btn-danger undo-btn" onclick="undoLastSale()">Undo this sale</button>` : ""}
       </div>`;
     }).join("") + `</div>`;
   }
@@ -1233,14 +1291,12 @@ function removeQr(){
 function showPaymentCode(){
   if(!state.settings.qr) return;
   document.getElementById("overlayHost").innerHTML = `
-    <div class="pad-overlay" onclick="if(event.target===this) closePaymentCode()">
-      <div class="pad-card">
-        <div class="pad-name">Scan to pay</div>
-        <img src="${state.settings.qr}" class="qr-full" alt="Payment QR code">
-        <div class="pad-actions">
-          <button class="btn btn-ghost" onclick="closePaymentCode()">Done</button>
-        </div>
+    <div class="qr-screen">
+      <div class="qr-screen-title">Scan to pay</div>
+      <div class="qr-screen-body">
+        <img src="${state.settings.qr}" alt="Payment QR code">
       </div>
+      <button class="btn btn-ghost btn-full" onclick="closePaymentCode()">Done</button>
     </div>`;
 }
 
