@@ -224,27 +224,44 @@
   .sale-time{color:var(--plum-soft);font-size:11.5px;}
   .sale-items{color:var(--plum-soft);font-size:12.5px;margin-top:2px;}
   .undo-btn{margin-top:8px;padding:6px 12px;font-size:12px;}
+  /* Pinned above the tab bar rather than sticky: the card is the only child
+     of #cartArea, so sticky had no room to travel and scrolled away with the
+     grid. #cartArea is given a matching height in renderCart so the last row
+     of products can still be scrolled clear of it. */
   .cart-card{
     background:var(--card);
     border:2px solid var(--pink);
     border-radius:16px;
-    padding:14px;
-    margin-bottom:16px;
-    position:sticky;
-    bottom:74px;
+    padding:12px;
+    position:fixed;
+    left:50%;
+    transform:translateX(-50%);
+    width:calc(100% - 32px);
+    max-width:488px;
+    /* Tab bar is 77px tall plus whatever safe-area inset it absorbs; this
+       clears it with a small gap. */
+    bottom:calc(84px + env(safe-area-inset-bottom));
+    z-index:40;
+    box-shadow:0 6px 20px rgba(45,27,51,0.12);
   }
+  /* Only the line items scroll, so the total and Complete sale stay put
+     no matter how many different products are in the sale. */
+  .cart-rows{max-height:24vh;overflow-y:auto;}
   .cart-row{
-    display:flex;align-items:center;gap:10px;
-    padding:6px 0;
+    display:flex;align-items:center;gap:8px;
+    padding:3px 0;
   }
-  .cart-row .name{flex:1;font-size:14px;font-weight:700;}
-  .cart-row .sub{font-size:12.5px;color:var(--plum-soft);min-width:56px;text-align:right;}
+  .cart-row .name{flex:1;font-size:14px;font-weight:700;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .cart-row .sub{font-size:12.5px;color:var(--plum-soft);min-width:52px;text-align:right;}
+  .cart-row .btn-round{width:26px;height:26px;font-size:15px;}
   .cart-total{
     display:flex;justify-content:space-between;align-items:baseline;
     border-top:1px solid var(--line);
-    margin-top:8px;padding-top:10px;
+    margin-top:6px;padding-top:7px;
   }
-  .cart-total .amt{font-family:'Baloo 2';font-size:22px;font-weight:800;}
+  .cart-total .amt{font-family:'Baloo 2';font-size:20px;font-weight:800;}
+  /* Compact, so showing the payment code doesn't cost a whole row. */
+  .cart-qr-btn{flex:none;padding:9px 11px;}
   .toast{
     position:fixed;top:16px;left:50%;transform:translateX(-50%);
     background:var(--plum);color:#fff;padding:10px 18px;border-radius:999px;
@@ -663,7 +680,7 @@ function renderCart(){
   const area = document.getElementById("cartArea");
   if(!area) return;
   const count = cartCount();
-  if(count === 0){ area.innerHTML = ""; return; }
+  if(count === 0){ area.innerHTML = ""; area.style.height = ""; return; }
   let rows = "";
   Object.keys(cart).forEach(pid=>{
     const p = state.products.find(x=>x.id===pid);
@@ -679,17 +696,22 @@ function renderCart(){
     </div>`;
   });
   area.innerHTML = `<div class="cart-card">
-    ${rows}
+    <div class="cart-rows">${rows}</div>
     <div class="cart-total">
       <span>${count} item${count===1?"":"s"}</span>
       <span class="amt">${money(cartTotal())}</span>
     </div>
-    ${state.settings.qr ? `<button class="btn btn-teal-outline btn-full" style="margin-top:10px;" onclick="showPaymentCode()">Show payment code</button>` : ""}
-    <div class="pad-actions" style="margin-top:10px;">
-      <button class="btn btn-ghost" onclick="cancelSale()">Cancel sale</button>
+    <div class="pad-actions" style="margin-top:8px;">
+      <button class="btn btn-ghost" onclick="cancelSale()">Cancel</button>
+      ${state.settings.qr ? `<button class="btn btn-teal-outline cart-qr-btn" onclick="showPaymentCode()" title="Show payment code">QR</button>` : ""}
       <button class="btn btn-pink" style="flex:2;" onclick="completeSale()">Complete sale</button>
     </div>
   </div>`;
+
+  // The card is out of flow, so reserve the same height here to keep the
+  // last products scrollable clear of it.
+  const card = area.querySelector(".cart-card");
+  area.style.height = card ? (card.offsetHeight + 16) + "px" : "";
 }
 
 function completeSale(){
