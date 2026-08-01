@@ -529,6 +529,14 @@ function renderTop(){
 
 function lowStockClass(qty){ return qty <= 2 ? "low" : ""; }
 
+// Sorts a copy so the stored order stays as-entered. Case-insensitive, and
+// numeric so "Cup 2" comes before "Cup 10" rather than after it.
+function productsByName(){
+  return state.products.slice().sort((a, b)=>
+    a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true })
+  );
+}
+
 function renderSell(){
   const wrap = document.getElementById("sellTiles");
   if(state.products.length === 0){
@@ -537,7 +545,7 @@ function renderSell(){
   }
   wrap.innerHTML = `<div class="grid" id="sellGrid"></div><div id="cartArea"></div>`;
   const grid = document.getElementById("sellGrid");
-  state.products.forEach(p=>{
+  productsByName().forEach(p=>{
     const inCart = cartQtyFor(p.id);
     const unallocated = p.stand - inCart;
     // Only truly out-of-stock products are disabled. A product whose whole
@@ -879,7 +887,7 @@ function renderSetup(){
   if(state.products.length === 0){
     listHtml = `<div class="empty-msg">No products yet — add your first one below.</div>`;
   } else {
-    listHtml = state.products.map(p=>
+    listHtml = productsByName().map(p=>
       p.id === editingProductId ? editFormHtml(p) : `
       <div class="row-card">
         <div class="row-emoji">${p.emoji}</div>
