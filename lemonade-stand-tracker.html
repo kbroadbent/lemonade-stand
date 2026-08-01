@@ -164,6 +164,10 @@
   .emoji-pick{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;}
   .emoji-opt{
     font-size:22px;
+    font-weight:800;
+    line-height:1.2;
+    min-width:40px;
+    text-align:center;
     padding:6px 9px;
     border-radius:10px;
     border:1px solid var(--line);
@@ -171,6 +175,22 @@
     cursor:pointer;
   }
   .emoji-opt.sel{border-color:var(--lemon-dark);background:#FFF3D6;}
+  /* 60-odd icons would otherwise push the form's buttons off the screen. */
+  .icon-picker{
+    max-height:210px;
+    overflow-y:auto;
+    border:1px solid var(--line);
+    border-radius:12px;
+    padding:4px 10px 10px;
+    background:#FFFDF6;
+  }
+  .icon-group-label{
+    font-size:11px;font-weight:800;
+    color:var(--plum-soft);
+    text-transform:uppercase;
+    letter-spacing:.05em;
+    margin:12px 0 2px;
+  }
   .tabbar{
     position:fixed;bottom:0;left:0;right:0;
     background:var(--card);
@@ -336,7 +356,18 @@
 
 <script>
 const STORAGE_KEY = "lemonade-stand-state";
-const EMOJI_CHOICES = ["🍋","🥤","🍬","🍫","🍪","🧃","🍭","🥨","🧋","🍩","🍇","🧁"];
+// Letters and numbers are plain characters rather than the boxed-letter
+// emoji, which render inconsistently (and pair up into flags) across
+// platforms. Styled at the same size they read as deliberate icons.
+const LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("");
+const ICON_GROUPS = [
+  { label: "Drinks", icons: ["🍋","🥤","🧃","🧋","🥛","☕","🍵","🍹","🧊","🍊","🍓","🍇","🍉","🍑","🍍","🥥"] },
+  { label: "Snacks", icons: ["🍪","🍬","🍫","🍭","🥨","🍩","🧁","🍰","🥧","🍿","🍦","🧀","🥪","🌭","🍕","🥕"] },
+  { label: "Extras", icons: ["⭐","❤️","🔥","💧","🌈","🎈","🏆","💰","🌞","❄️","🍀","🎉"] },
+  { label: "Numbers", icons: ["0️⃣","1️⃣","2️⃣","3️⃣","4️⃣","5️⃣","6️⃣","7️⃣","8️⃣","9️⃣"] },
+  { label: "Letters", icons: LETTERS }
+];
+const EMOJI_CHOICES = ICON_GROUPS.reduce((all, g)=> all.concat(g.icons), []);
 const QUICK_PICKS = [1, 2, 5, 10];
 const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
 const EDIT_FIELDS = ["edName", "edPrice", "edCost", "edHome", "edStand"];
@@ -794,10 +825,27 @@ function renderSetup(){
   wrap.innerHTML = listHtml;
 }
 
-function editFormHtml(p){
-  const emojis = EMOJI_CHOICES.map(e=>
-    `<div class="emoji-opt${e === editEmoji ? " sel" : ""}" onclick="pickEditEmoji('${e}')">${e}</div>`
+// Both product forms use this; `which` tags the container so the delegated
+// click handler knows whether a pick belongs to the add or the edit form.
+function iconPickerHtml(which, selected){
+  const groups = ICON_GROUPS.map(g=>
+    `<div class="icon-group-label">${g.label}</div>
+     <div class="emoji-pick">` +
+    g.icons.map(icon=>
+      `<div class="emoji-opt${icon === selected ? " sel" : ""}" data-icon="${escapeHtml(icon)}">${escapeHtml(icon)}</div>`
+    ).join("") +
+    `</div>`
   ).join("");
+  return `<div class="icon-picker" data-picker="${which}">${groups}</div>`;
+}
+
+function selectedIcon(which){
+  const el = document.querySelector('[data-picker="' + which + '"] .emoji-opt.sel');
+  return el ? el.dataset.icon : EMOJI_CHOICES[0];
+}
+
+function editFormHtml(p){
+  const emojis = iconPickerHtml("edit", editEmoji);
   return `
     <div class="form-card">
       <h3>Edit ${escapeHtml(p.name)}</h3>
@@ -829,7 +877,7 @@ function editFormHtml(p){
         </div>
       </div>
       <label>Pick an icon</label>
-      <div class="emoji-pick" id="edEmojiPick">${emojis}</div>
+      ${emojis}
       <div class="pad-actions" style="margin-top:14px;">
         <button class="btn btn-ghost" onclick="cancelEditProduct()">Cancel</button>
         <button class="btn btn-pink" onclick="saveProductEdit()">Save changes</button>
@@ -853,12 +901,6 @@ function cancelEditProduct(){
   renderSetup();
 }
 
-function pickEditEmoji(e){
-  editEmoji = e;
-  document.querySelectorAll("#edEmojiPick .emoji-opt").forEach(el=>{
-    el.classList.toggle("sel", el.textContent === e);
-  });
-}
 
 function saveProductEdit(){
   const p = state.products.find(x=>x.id===editingProductId);
@@ -974,8 +1016,7 @@ function addProduct(){
     name: "newName", price: "newPrice", cost: "newCost", home: "newHome"
   });
   if(!values) return;
-  const emojiEl = document.querySelector("#emojiPick .emoji-opt.sel");
-  const emoji = emojiEl ? emojiEl.textContent : "🍋";
+  const emoji = selectedIcon("add");
 
   state.products.push({
     id: uid(),
@@ -991,8 +1032,9 @@ function addProduct(){
   document.getElementById("newPrice").value = "";
   document.getElementById("newCost").value = "";
   document.getElementById("newHome").value = "";
-  document.querySelectorAll("#emojiPick .emoji-opt").forEach(e=>e.classList.remove("sel"));
+  document.querySelectorAll("#emojiPick .emoji-opt").forEach(e=> e.classList.remove("sel"));
   document.querySelector("#emojiPick .emoji-opt").classList.add("sel");
+  document.getElementById("emojiPick").querySelector(".icon-picker").scrollTop = 0;
   renderSetup(); renderSell(); renderRestock();
   showToast("Product added");
 }
@@ -1238,7 +1280,7 @@ function buildApp(){
         <input type="number" id="newHome" min="0" placeholder="10">
         <div class="field-error" id="newHomeErr"></div>
         <label>Pick an icon</label>
-        <div class="emoji-pick" id="emojiPick"></div>
+        <div id="emojiPick"></div>
         <button class="btn btn-pink btn-full" style="margin-top:14px;" onclick="addProduct()">Add product</button>
       </div>
       <div class="section-title">Your products</div>
@@ -1252,16 +1294,18 @@ function buildApp(){
     <div id="padHost"></div>
     <div id="overlayHost"></div>
   `;
-  const pick = document.getElementById("emojiPick");
-  EMOJI_CHOICES.forEach((e,i)=>{
-    const d = document.createElement("div");
-    d.className = "emoji-opt" + (i===0 ? " sel" : "");
-    d.textContent = e;
-    d.onclick = ()=>{
-      document.querySelectorAll(".emoji-opt").forEach(x=>x.classList.remove("sel"));
-      d.classList.add("sel");
-    };
-    pick.appendChild(d);
+  document.getElementById("emojiPick").innerHTML = iconPickerHtml("add", EMOJI_CHOICES[0]);
+
+  // Delegated so it covers the edit form's picker too, and scoped to the
+  // picker that was clicked so the two forms can't clear each other.
+  document.addEventListener("click", e=>{
+    const opt = e.target.closest ? e.target.closest(".emoji-opt") : null;
+    if(!opt) return;
+    const picker = opt.closest("[data-picker]");
+    if(!picker) return;
+    picker.querySelectorAll(".emoji-opt").forEach(x=> x.classList.remove("sel"));
+    opt.classList.add("sel");
+    if(picker.dataset.picker === "edit") editEmoji = opt.dataset.icon;
   });
 
   // Clear a field's highlight as soon as it's being corrected, so the red
