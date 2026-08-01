@@ -585,12 +585,12 @@ function productsByName(){
   return state.products.slice().sort(byName);
 }
 
-// "stock" puts the most plentiful first, so whatever there's most of to sell
-// is nearest the top. Ties fall back to name, so equal counts don't shuffle
+// "stock" sorts ascending, fewest left first, so whatever is running out is
+// nearest the top. Ties fall back to name, so equal counts don't shuffle
 // around unpredictably between renders.
 function sortedProducts(mode){
   if(mode !== "stock") return productsByName();
-  return state.products.slice().sort((a, b)=> (b.stand - a.stand) || byName(a, b));
+  return state.products.slice().sort((a, b)=> (a.stand - b.stand) || byName(a, b));
 }
 
 function setSellSort(mode){
@@ -1502,7 +1502,7 @@ function buildApp(){
       <div class="sort-bar" id="sellSortBar">
         <span class="sort-label">Sort</span>
         <button class="sort-btn" data-sort="name" onclick="setSellSort('name')">A&ndash;Z</button>
-        <button class="sort-btn" data-sort="stock" onclick="setSellSort('stock')">Most left</button>
+        <button class="sort-btn" data-sort="stock" onclick="setSellSort('stock')">Fewest left</button>
       </div>
       <div id="sellTiles"></div>
     </section>
