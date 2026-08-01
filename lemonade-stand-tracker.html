@@ -339,12 +339,27 @@ const STORAGE_KEY = "lemonade-stand-state";
 const EMOJI_CHOICES = ["🍋","🥤","🍬","🍫","🍪","🧃","🍭","🥨","🧋","🍩","🍇","🧁"];
 const QUICK_PICKS = [1, 2, 5, 10];
 const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
+const EDIT_FIELDS = ["edName", "edPrice", "edCost", "edHome", "edStand"];
 let state = { products: [], sales: [], settings: { qr: null } };
 let cart = {};
 let currentTab = "sell";
 let lastSale = null;
 let padProductId = null;
 let padQty = 1;
+let editingProductId = null;
+let editEmoji = null;
+
+// Product names are typed by the user and get injected into innerHTML in a
+// dozen places; a name containing a quote or angle bracket would otherwise
+// break the markup (most visibly the edit form's value attribute).
+function escapeHtml(s){
+  return String(s)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
 
 function uid(){ return Date.now().toString(36) + Math.random().toString(36).slice(2,7); }
 
@@ -472,7 +487,7 @@ function renderSell(){
     div.innerHTML = `
       ${inCart > 0 ? `<div class="tile-cart-badge">${inCart}</div>` : ""}
       <div class="tile-emoji">${p.emoji}</div>
-      <div class="tile-name">${p.name}</div>
+      <div class="tile-name">${escapeHtml(p.name)}</div>
       <div class="tile-price">${money(p.price)}</div>
       <div class="tile-qty ${lowStockClass(unallocated)}">${unallocated} at stand</div>
     `;
@@ -538,7 +553,7 @@ function renderQtyPad(){
     <div class="pad-overlay" onclick="if(event.target===this) closeQtyPad()">
       <div class="pad-card">
         <div class="pad-emoji">${p.emoji}</div>
-        <div class="pad-name">${p.name}</div>
+        <div class="pad-name">${escapeHtml(p.name)}</div>
         <div class="pad-each">${money(p.price)} each</div>
         <div class="pad-stepper">
           <button class="pad-big" onclick="padSetQty(${padQty - 1})">&minus;</button>
@@ -584,7 +599,7 @@ function renderCart(){
     if(!p) return;
     rows += `<div class="cart-row">
       <span style="font-size:18px;">${p.emoji}</span>
-      <span class="name">${p.name}</span>
+      <span class="name">${escapeHtml(p.name)}</span>
       <button class="btn btn-round" onclick="changeCartQty('${pid}',-1)">&minus;</button>
       <button class="cart-qty" onclick="openQtyPad('${pid}')" title="Tap to pick a number">${cart[pid]}</button>
       <button class="btn btn-round" onclick="changeCartQty('${pid}',1)">+</button>
@@ -643,7 +658,7 @@ function renderRestock(){
       <div class="restock-head">
         <div class="row-emoji">${p.emoji}</div>
         <div class="row-main">
-          <div class="row-name">${p.name}</div>
+          <div class="row-name">${escapeHtml(p.name)}</div>
           <div class="row-detail">Storage: ${p.home} &nbsp;•&nbsp; Stand: ${p.stand}</div>
         </div>
       </div>
@@ -730,7 +745,7 @@ function renderSales(){
     breakdownHtml = names.map(n=>{
       const d = byProduct[n];
       const prof = d.revenue - d.cost;
-      return `<div class="row-card"><div class="row-emoji">${d.emoji}</div><div class="row-main"><div class="row-name">${n}</div><div class="row-detail">${d.qty} sold &nbsp;•&nbsp; ${money(prof)} profit</div></div><div class="row-name">${money(d.revenue)}</div></div>`;
+      return `<div class="row-card"><div class="row-emoji">${d.emoji}</div><div class="row-main"><div class="row-name">${escapeHtml(n)}</div><div class="row-detail">${d.qty} sold &nbsp;•&nbsp; ${money(prof)} profit</div></div><div class="row-name">${money(d.revenue)}</div></div>`;
     }).join("");
   }
   let logHtml = "";
@@ -741,7 +756,7 @@ function renderSales(){
     logHtml = `<div class="form-card">` + recent.map(s=>{
       const t = new Date(s.time);
       const timeStr = t.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
-      const itemsStr = s.items.map(it=> `${it.qty}x ${it.emoji} ${it.name}`).join(", ");
+      const itemsStr = s.items.map(it=> `${it.qty}x ${it.emoji} ${escapeHtml(it.name)}`).join(", ");
       return `<div class="sale-log-item">
         <div class="sale-log-top"><span>${money(s.revenue)}</span><span class="sale-time">${timeStr}</span></div>
         <div class="sale-items">${itemsStr}</div>
@@ -762,19 +777,116 @@ function renderSetup(){
   if(state.products.length === 0){
     listHtml = `<div class="empty-msg">No products yet — add your first one below.</div>`;
   } else {
-    listHtml = state.products.map(p=>`
+    listHtml = state.products.map(p=>
+      p.id === editingProductId ? editFormHtml(p) : `
       <div class="row-card">
         <div class="row-emoji">${p.emoji}</div>
         <div class="row-main">
-          <div class="row-name">${p.name}</div>
+          <div class="row-name">${escapeHtml(p.name)}</div>
           <div class="row-detail">Sell ${money(p.price)} &nbsp;•&nbsp; Cost ${money(p.cost)} &nbsp;•&nbsp; Storage ${p.home} / Stand ${p.stand}</div>
         </div>
         <div class="row-actions">
+          <button class="btn btn-teal-outline" onclick="startEditProduct('${p.id}')">Edit</button>
           <button class="btn btn-danger" onclick="removeProduct('${p.id}')">Remove</button>
         </div>
       </div>`).join("");
   }
   wrap.innerHTML = listHtml;
+}
+
+function editFormHtml(p){
+  const emojis = EMOJI_CHOICES.map(e=>
+    `<div class="emoji-opt${e === editEmoji ? " sel" : ""}" onclick="pickEditEmoji('${e}')">${e}</div>`
+  ).join("");
+  return `
+    <div class="form-card">
+      <h3>Edit ${escapeHtml(p.name)}</h3>
+      <label>Name</label>
+      <input type="text" id="edName" value="${escapeHtml(p.name)}">
+      <div class="field-error" id="edNameErr"></div>
+      <div class="two-col">
+        <div>
+          <label>Sell price</label>
+          <input type="number" id="edPrice" step="0.25" min="0" value="${p.price}">
+          <div class="field-error" id="edPriceErr"></div>
+        </div>
+        <div>
+          <label>Cost to make/buy</label>
+          <input type="number" id="edCost" step="0.05" min="0" value="${p.cost}">
+          <div class="field-error" id="edCostErr"></div>
+        </div>
+      </div>
+      <div class="two-col">
+        <div>
+          <label>In storage</label>
+          <input type="number" id="edHome" min="0" value="${p.home}">
+          <div class="field-error" id="edHomeErr"></div>
+        </div>
+        <div>
+          <label>At the stand</label>
+          <input type="number" id="edStand" min="0" value="${p.stand}">
+          <div class="field-error" id="edStandErr"></div>
+        </div>
+      </div>
+      <label>Pick an icon</label>
+      <div class="emoji-pick" id="edEmojiPick">${emojis}</div>
+      <div class="pad-actions" style="margin-top:14px;">
+        <button class="btn btn-ghost" onclick="cancelEditProduct()">Cancel</button>
+        <button class="btn btn-pink" onclick="saveProductEdit()">Save changes</button>
+      </div>
+    </div>`;
+}
+
+function startEditProduct(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  editingProductId = id;
+  editEmoji = p.emoji;
+  renderSetup();
+  const el = document.getElementById("edName");
+  if(el) el.focus();
+}
+
+function cancelEditProduct(){
+  editingProductId = null;
+  editEmoji = null;
+  renderSetup();
+}
+
+function pickEditEmoji(e){
+  editEmoji = e;
+  document.querySelectorAll("#edEmojiPick .emoji-opt").forEach(el=>{
+    el.classList.toggle("sel", el.textContent === e);
+  });
+}
+
+function saveProductEdit(){
+  const p = state.products.find(x=>x.id===editingProductId);
+  if(!p){ cancelEditProduct(); return; }
+  const values = readProductForm({
+    name: "edName", price: "edPrice", cost: "edCost", home: "edHome", stand: "edStand"
+  });
+  if(!values) return;
+
+  p.name = values.name;
+  p.price = values.price;
+  p.cost = values.cost;
+  p.home = values.home;
+  p.stand = values.stand;
+  p.emoji = editEmoji || p.emoji;
+
+  // Lowering the stand count can leave an in-progress cart asking for more
+  // than exists, which would drive stock negative on completing the sale.
+  if(cart[p.id] && cart[p.id] > p.stand){
+    if(p.stand > 0) cart[p.id] = p.stand;
+    else delete cart[p.id];
+  }
+
+  saveState();
+  editingProductId = null;
+  editEmoji = null;
+  renderSetup(); renderSell(); renderRestock(); renderSales();
+  showToast("Product updated");
 }
 
 function removeProduct(id){
@@ -785,8 +897,8 @@ function removeProduct(id){
   showToast("Product removed");
 }
 
-function clearFieldErrors(){
-  PRODUCT_FIELDS.forEach(id=>{
+function clearFieldErrors(ids){
+  (ids || PRODUCT_FIELDS).forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.classList.remove("invalid");
     const err = document.getElementById(id + "Err");
@@ -801,60 +913,86 @@ function markField(id, msg){
   if(err){ err.textContent = msg; err.classList.add("show"); }
 }
 
-function addProduct(){
-  clearFieldErrors();
-  const name = document.getElementById("newName").value.trim();
-  const priceRaw = document.getElementById("newPrice").value.trim();
-  const costRaw = document.getElementById("newCost").value.trim();
-  const homeRaw = document.getElementById("newHome").value.trim();
-  const emojiEl = document.querySelector(".emoji-opt.sel");
-  const emoji = emojiEl ? emojiEl.textContent : "🍋";
-
-  // Every field is checked before bailing out, so a form with two problems
-  // highlights both at once instead of surfacing them one reload at a time.
+// Shared by the add form and the edit form so both enforce identical rules.
+// `ids` maps each logical field to the id of its input; omit `stand` for the
+// add form, where a new product always starts with nothing at the stand.
+// Every field is checked before bailing out, so a form with two problems
+// highlights both at once instead of surfacing them one submit at a time.
+function readProductForm(ids){
+  const fieldIds = Object.keys(ids).map(k=> ids[k]);
+  clearFieldErrors(fieldIds);
+  const raw = id => document.getElementById(id).value.trim();
   const bad = [];
+
+  const name = raw(ids.name);
   if(!name){
-    markField("newName", "Give it a name");
-    bad.push("newName");
+    markField(ids.name, "Give it a name");
+    bad.push(ids.name);
   }
 
+  const priceRaw = raw(ids.price);
   const price = parseFloat(priceRaw);
   if(priceRaw === ""){
-    markField("newPrice", "Enter a sell price");
-    bad.push("newPrice");
+    markField(ids.price, "Enter a sell price");
+    bad.push(ids.price);
   } else if(isNaN(price) || price < 0){
-    markField("newPrice", "Must be 0 or more");
-    bad.push("newPrice");
+    markField(ids.price, "Must be 0 or more");
+    bad.push(ids.price);
   }
 
-  // Blank cost and stock are fine and mean zero — but a value that was typed
+  // Blank cost and counts are fine and mean zero — but a value that was typed
   // and can't be read is a mistake worth showing, not silently turning into 0.
+  const costRaw = raw(ids.cost);
   const cost = costRaw === "" ? 0 : parseFloat(costRaw);
   if(costRaw !== "" && (isNaN(cost) || cost < 0)){
-    markField("newCost", "Must be 0 or more");
-    bad.push("newCost");
+    markField(ids.cost, "Must be 0 or more");
+    bad.push(ids.cost);
   }
 
-  const home = homeRaw === "" ? 0 : parseInt(homeRaw, 10);
-  if(homeRaw !== "" && (isNaN(home) || home < 0)){
-    markField("newHome", "Must be a whole number, 0 or more");
-    bad.push("newHome");
-  }
+  const wholeNumber = (id, label)=>{
+    const r = raw(id);
+    const n = r === "" ? 0 : parseInt(r, 10);
+    if(r !== "" && (isNaN(n) || n < 0)){
+      markField(id, "Must be a whole number, 0 or more");
+      bad.push(id);
+    }
+    return n;
+  };
+  const home = wholeNumber(ids.home);
+  const stand = ids.stand ? wholeNumber(ids.stand) : 0;
 
   if(bad.length){
     showToast(bad.length === 1 ? "Check the highlighted box" : "Check the highlighted boxes");
     document.getElementById(bad[0]).focus();
-    return;
+    return null;
   }
+  return { name, price, cost, home, stand };
+}
 
-  state.products.push({ id: uid(), name, price, cost, emoji, home, stand: 0 });
+function addProduct(){
+  const values = readProductForm({
+    name: "newName", price: "newPrice", cost: "newCost", home: "newHome"
+  });
+  if(!values) return;
+  const emojiEl = document.querySelector("#emojiPick .emoji-opt.sel");
+  const emoji = emojiEl ? emojiEl.textContent : "🍋";
+
+  state.products.push({
+    id: uid(),
+    name: values.name,
+    price: values.price,
+    cost: values.cost,
+    emoji,
+    home: values.home,
+    stand: 0
+  });
   saveState();
   document.getElementById("newName").value = "";
   document.getElementById("newPrice").value = "";
   document.getElementById("newCost").value = "";
   document.getElementById("newHome").value = "";
-  document.querySelectorAll(".emoji-opt").forEach(e=>e.classList.remove("sel"));
-  document.querySelector(".emoji-opt").classList.add("sel");
+  document.querySelectorAll("#emojiPick .emoji-opt").forEach(e=>e.classList.remove("sel"));
+  document.querySelector("#emojiPick .emoji-opt").classList.add("sel");
   renderSetup(); renderSell(); renderRestock();
   showToast("Product added");
 }
@@ -1127,15 +1265,14 @@ function buildApp(){
   });
 
   // Clear a field's highlight as soon as it's being corrected, so the red
-  // doesn't linger while the kid is still typing the fix.
-  PRODUCT_FIELDS.forEach(id=>{
-    const el = document.getElementById(id);
-    if(!el) return;
-    el.addEventListener("input", ()=>{
-      el.classList.remove("invalid");
-      const err = document.getElementById(id + "Err");
-      if(err){ err.textContent = ""; err.classList.remove("show"); }
-    });
+  // doesn't linger while the kid is still typing the fix. Delegated from the
+  // document because the edit form's inputs are created on demand.
+  document.addEventListener("input", e=>{
+    const el = e.target;
+    if(!el.classList || !el.classList.contains("invalid")) return;
+    el.classList.remove("invalid");
+    const err = document.getElementById(el.id + "Err");
+    if(err){ err.textContent = ""; err.classList.remove("show"); }
   });
 
   document.querySelectorAll(".tab").forEach(b=>{
