@@ -95,6 +95,24 @@
     100%{transform:scale(1);}
   }
   .section-title{font-size:15px;color:var(--plum-soft);margin:18px 0 10px;font-weight:700;}
+  .search-wrap{position:relative;margin-bottom:12px;}
+  .search-wrap input{
+    width:100%;
+    padding:10px 36px 10px 12px;
+    border-radius:12px;
+    border:1px solid var(--line);
+    font-family:'Nunito';font-size:15px;
+    background:#FFFEFA;
+  }
+  .search-clear{
+    position:absolute;top:50%;right:6px;transform:translateY(-50%);
+    display:none;
+    width:26px;height:26px;border:none;border-radius:50%;
+    background:#F3EFE3;color:var(--plum-soft);
+    font-size:16px;font-weight:800;line-height:1;
+    cursor:pointer;padding:0;
+  }
+  .search-clear.show{display:block;}
   .row-card{
     background:var(--card);
     border:1px solid var(--line);
@@ -383,7 +401,7 @@
 <div class="toast" id="toast"></div>
 
 <div class="tabbar" id="tabbar" style="display:none;">
-  <button class="tab" data-tab="sell"><span class="ic">&#129534;</span>Sell</button>
+  <button class="tab" data-tab="sell"><span class="ic">&#129534;</span>Register</button>
   <button class="tab" data-tab="restock"><span class="ic">&#128257;</span>Restock</button>
   <button class="tab" data-tab="sales"><span class="ic">&#128203;</span>Sales</button>
   <button class="tab" data-tab="setup"><span class="ic">&#128230;</span>Products</button>
@@ -554,15 +572,67 @@ function productsByName(){
   );
 }
 
+// The search inputs are static markup outside the containers that get
+// re-rendered, so typing never destroys the field or loses focus.
+const searchQuery = { sell: "", setup: "" };
+
+function onSearch(which, value){
+  searchQuery[which] = value;
+  const clear = document.getElementById(which + "SearchClear");
+  if(clear) clear.classList.toggle("show", value.length > 0);
+  if(which === "sell") renderSell();
+  else renderSetup();
+}
+
+function resetSearch(which){
+  const input = document.getElementById(which + "Search");
+  if(input) input.value = "";
+  onSearch(which, "");
+}
+
+// The × button; focuses the field afterwards so typing can continue.
+function clearSearch(which){
+  resetSearch(which);
+  const input = document.getElementById(which + "Search");
+  if(input) input.focus();
+}
+
+// Products matching the given tab's search, already alphabetised. `keepId`
+// survives the filter regardless — used so an open edit form doesn't vanish
+// when the text no longer matches what's being typed into the name field.
+function visibleProducts(which, keepId){
+  const q = searchQuery[which].trim().toLowerCase();
+  const all = productsByName();
+  if(!q) return all;
+  return all.filter(p=> p.id === keepId || p.name.toLowerCase().indexOf(q) !== -1);
+}
+
+// Hides the search box when there's nothing to search through.
+function syncSearchVisibility(){
+  ["sell", "setup"].forEach(which=>{
+    const wrap = document.getElementById(which + "SearchWrap");
+    if(wrap) wrap.style.display = state.products.length ? "" : "none";
+  });
+}
+
 function renderSell(){
   const wrap = document.getElementById("sellTiles");
+  syncSearchVisibility();
   if(state.products.length === 0){
     wrap.innerHTML = `<div class="empty-msg">No products yet. Add one in the Products tab to start selling.</div>`;
     return;
   }
+  const shown = visibleProducts("sell");
+  if(shown.length === 0){
+    // The cart still has to render, or an in-progress sale would disappear
+    // the moment the search text stopped matching anything.
+    wrap.innerHTML = `<div class="empty-msg">No products match that search.</div><div id="cartArea"></div>`;
+    renderCart();
+    return;
+  }
   wrap.innerHTML = `<div class="grid" id="sellGrid"></div><div id="cartArea"></div>`;
   const grid = document.getElementById("sellGrid");
-  productsByName().forEach(p=>{
+  shown.forEach(p=>{
     const inCart = cartQtyFor(p.id);
     const unallocated = p.stand - inCart;
     // Only truly out-of-stock products are disabled. A product whose whole
@@ -905,11 +975,15 @@ function renderSales(){
 
 function renderSetup(){
   const wrap = document.getElementById("setupList");
+  syncSearchVisibility();
   let listHtml = "";
+  const shown = visibleProducts("setup", editingProductId);
   if(state.products.length === 0){
     listHtml = `<div class="empty-msg">No products yet — add your first one below.</div>`;
+  } else if(shown.length === 0){
+    listHtml = `<div class="empty-msg">No products match that search.</div>`;
   } else {
-    listHtml = productsByName().map(p=>
+    listHtml = shown.map(p=>
       p.id === editingProductId ? editFormHtml(p) : `
       <div class="row-card">
         <div class="row-emoji">${p.emoji}</div>
@@ -1028,7 +1102,14 @@ function saveProductEdit(){
   saveState();
   editingProductId = null;
   editEmoji = null;
-  renderSetup(); renderSell(); renderRestock(); renderSales();
+
+  // Renaming a product so it no longer matches the active search would make
+  // it vanish the instant it was saved; drop the filter instead.
+  const q = searchQuery.setup.trim().toLowerCase();
+  if(q && p.name.toLowerCase().indexOf(q) === -1) resetSearch("setup");
+  else renderSetup();
+
+  renderSell(); renderRestock(); renderSales();
   showToast("Product updated");
 }
 
@@ -1136,7 +1217,9 @@ function addProduct(){
   document.querySelectorAll("#emojiPick .emoji-opt").forEach(e=> e.classList.remove("sel"));
   document.querySelector("#emojiPick .emoji-opt").classList.add("sel");
   document.getElementById("emojiPick").querySelector(".icon-picker").scrollTop = 0;
-  renderSetup(); renderSell(); renderRestock();
+  // A stale filter would otherwise hide the product that was just added.
+  resetSearch("setup");
+  renderSell(); renderRestock();
   showToast("Product added");
 }
 
@@ -1345,6 +1428,8 @@ function resetAllData(){
   editingProductId = null;
   editEmoji = null;
   closePaymentCode();
+  resetSearch("sell");
+  resetSearch("setup");
   renderHeader();
   renderTop();
   renderSell(); renderRestock(); renderSales(); renderSetup(); renderSettings();
@@ -1377,6 +1462,11 @@ function buildApp(){
     <div id="jarBox"></div>
 
     <section id="sec-sell" class="active">
+      <div class="search-wrap" id="sellSearchWrap">
+        <input type="text" id="sellSearch" placeholder="Search products"
+               autocomplete="off" oninput="onSearch('sell', this.value)">
+        <button class="search-clear" id="sellSearchClear" onclick="clearSearch('sell')" title="Clear">&times;</button>
+      </div>
       <div id="sellTiles"></div>
     </section>
 
@@ -1415,6 +1505,11 @@ function buildApp(){
         <button class="btn btn-pink btn-full" style="margin-top:14px;" onclick="addProduct()">Add product</button>
       </div>
       <div class="section-title">Your products</div>
+      <div class="search-wrap" id="setupSearchWrap">
+        <input type="text" id="setupSearch" placeholder="Search products"
+               autocomplete="off" oninput="onSearch('setup', this.value)">
+        <button class="search-clear" id="setupSearchClear" onclick="clearSearch('setup')" title="Clear">&times;</button>
+      </div>
       <div id="setupList"></div>
     </section>
 
