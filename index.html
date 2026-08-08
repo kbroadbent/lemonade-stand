@@ -875,6 +875,9 @@ function undoLastSale(){
 
 function renderRestock(){
   const wrap = document.getElementById("restockList");
+  // Nothing at the stand means nothing to return, so the button stays hidden.
+  const btn = document.getElementById("returnAllBtn");
+  if(btn) btn.style.display = totalAtStand() > 0 ? "" : "none";
   if(state.products.length === 0){
     wrap.innerHTML = `<div class="empty-msg">Add a product first in the Products tab.</div>`;
     return;
@@ -898,8 +901,11 @@ function renderRestock(){
         ${chips}
       </div>
       <div class="restock-actions">
-        <button class="btn btn-teal-outline" onclick="addHome('${p.id}')">Add to storage</button>
-        <button class="btn btn-teal" onclick="moveToStand('${p.id}')">Move to stand &rarr;</button>
+        <button class="btn btn-teal-outline" onclick="addHome('${p.id}')">Add new stock</button>
+      </div>
+      <div class="restock-actions">
+        <button class="btn btn-teal-outline" onclick="moveToStorage('${p.id}')">&larr; To storage</button>
+        <button class="btn btn-teal" onclick="moveToStand('${p.id}')">To stand &rarr;</button>
       </div>
     `;
     wrap.appendChild(row);
@@ -924,6 +930,8 @@ function readRestockQty(id){
   return n;
 }
 
+// Net new inventory — stock you just made or bought. This does not come from
+// the stand; moveToStand and moveToStorage are the transfers between the two.
 function addHome(id){
   const p = state.products.find(x=>x.id===id);
   if(!p) return;
@@ -932,7 +940,62 @@ function addHome(id){
   p.home += n;
   saveState();
   renderRestock();
-  showToast("Added " + n + " to storage");
+  showToast("Added " + n + " new to storage");
+}
+
+// The reverse of moveToStand: packing unsold stock back up.
+function moveToStorage(id){
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+  const n = readRestockQty(id);
+  if(n === null) return;
+  if(p.stand <= 0){ showToast("Nothing at the stand"); return; }
+  const moved = Math.min(n, p.stand);
+  p.stand -= moved;
+  p.home += moved;
+  clampCartTo(p);
+  saveState();
+  renderRestock();
+  renderSell();
+  showToast(moved < n
+    ? "Only " + moved + " at the stand — moved " + moved
+    : "Moved " + moved + " to storage");
+}
+
+// Taking stock off the stand can leave an in-progress cart asking for more
+// than is there, which would drive the count negative on completing the sale.
+function clampCartTo(p){
+  if(!cart[p.id] || cart[p.id] <= p.stand) return;
+  if(p.stand > 0) cart[p.id] = p.stand;
+  else delete cart[p.id];
+}
+
+function totalAtStand(){
+  return state.products.reduce((n, p)=> n + p.stand, 0);
+}
+
+// End of the day: everything off the stand and back into storage at once.
+function returnAllToStorage(){
+  const total = totalAtStand();
+  if(total === 0){ showToast("Nothing at the stand"); return; }
+  const lines = [
+    "Return everything to storage?",
+    "",
+    total + " item" + (total === 1 ? "" : "s") + " will move from the stand back to storage."
+  ];
+  if(cartCount() > 0) lines.push("The sale you're building will be cleared.");
+  if(!confirm(lines.join("\n"))) return;
+
+  state.products.forEach(p=>{
+    p.home += p.stand;
+    p.stand = 0;
+  });
+  cart = {};
+  saveState();
+  renderRestock();
+  renderSell();
+  renderTop();
+  showToast("Everything back in storage");
 }
 
 function moveToStand(id){
@@ -1527,7 +1590,9 @@ function buildApp(){
     </section>
 
     <section id="sec-restock">
-      <div class="section-title">Move stock from storage to the stand</div>
+      <div class="section-title">Move stock between storage and the stand</div>
+      <button class="btn btn-ghost btn-full" id="returnAllBtn" style="margin-bottom:14px;"
+              onclick="returnAllToStorage()">Return everything to storage</button>
       <div id="restockList"></div>
     </section>
 
