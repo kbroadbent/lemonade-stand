@@ -1145,9 +1145,28 @@ function saveProductEdit(){
   showToast("Product updated");
 }
 
+// The only destructive action in the app that used to skip its confirm, and
+// the easiest to hit by accident — Remove sits beside Edit in a list you
+// scroll through. There's no undo, so the prompt spells out what is lost.
 function removeProduct(id){
-  state.products = state.products.filter(p=>p.id!==id);
+  const p = state.products.find(x=>x.id===id);
+  if(!p) return;
+
+  const lines = ["Remove " + p.name + "?", ""];
+  const stock = [];
+  if(p.home > 0) stock.push(p.home + " in storage");
+  if(p.stand > 0) stock.push(p.stand + " at the stand");
+  if(stock.length) lines.push(stock.join(" and ") + " will be lost.");
+  if(cart[id]) lines.push("It will also be taken out of the sale you're building.");
+  lines.push("Past sales are kept. This cannot be undone.");
+  if(!confirm(lines.join("\n"))) return;
+
+  state.products = state.products.filter(x=>x.id!==id);
   delete cart[id];
+  if(editingProductId === id){
+    editingProductId = null;
+    editEmoji = null;
+  }
   saveState();
   renderSetup(); renderSell(); renderRestock(); renderSales();
   showToast("Product removed");
