@@ -1124,13 +1124,13 @@ function editFormHtml(p){
       <div class="field-error" id="edNameErr"></div>
       <div class="two-col">
         <div>
-          <label>Sell price</label>
-          <input type="number" id="edPrice" step="0.25" min="0" value="${p.price}">
+          <label>Sell price ($)</label>
+          <input type="number" id="edPrice" step="0.25" min="0" value="${Number(p.price).toFixed(2)}">
           <div class="field-error" id="edPriceErr"></div>
         </div>
         <div>
-          <label>Cost to make/buy</label>
-          <input type="number" id="edCost" step="0.05" min="0" value="${p.cost}">
+          <label>Cost to make/buy ($)</label>
+          <input type="number" id="edCost" step="0.05" min="0" value="${Number(p.cost).toFixed(2)}">
           <div class="field-error" id="edCostErr"></div>
         </div>
       </div>
@@ -1608,12 +1608,12 @@ function buildApp(){
         <div class="field-error" id="newNameErr"></div>
         <div class="two-col">
           <div>
-            <label>Sell price</label>
+            <label>Sell price ($)</label>
             <input type="number" id="newPrice" step="0.25" min="0" placeholder="1.00">
             <div class="field-error" id="newPriceErr"></div>
           </div>
           <div>
-            <label>Cost to make/buy</label>
+            <label>Cost to make/buy ($)</label>
             <input type="number" id="newCost" step="0.05" min="0" placeholder="0.20">
             <div class="field-error" id="newCostErr"></div>
           </div>
