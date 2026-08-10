@@ -113,7 +113,22 @@
     cursor:pointer;padding:0;
   }
   .search-clear.show{display:block;}
-  .sort-bar{display:flex;align-items:center;gap:6px;margin:-4px 0 12px;}
+  .sort-bar{display:flex;align-items:center;gap:6px;margin:-4px 0 12px;flex-wrap:wrap;}
+  .filter-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
+  .select-box{
+    flex:1;min-width:0;
+    padding:9px 12px;border-radius:10px;
+    border:1px solid var(--line);background:#FFFEFA;
+    font-family:'Nunito';font-weight:800;font-size:14px;
+    color:var(--plum);cursor:pointer;
+  }
+  .stat-grid.three{grid-template-columns:1fr 1fr 1fr;}
+  .day-head{
+    display:flex;justify-content:space-between;align-items:baseline;
+    margin:16px 0 8px;
+  }
+  .day-head .d{font-family:'Baloo 2';font-weight:800;font-size:15px;}
+  .day-head .t{font-size:12.5px;color:var(--plum-soft);font-weight:700;}
   .sort-label{font-size:12px;font-weight:800;color:var(--plum-soft);margin-right:2px;}
   .sort-btn{
     border:1px solid var(--line);background:#FFFEFA;
@@ -437,12 +452,16 @@ const EMOJI_CHOICES = ICON_GROUPS.reduce((all, g)=> all.concat(g.icons), []);
 const QUICK_PICKS = [1, 2, 5, 10];
 const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
 const EDIT_FIELDS = ["edName", "edPrice", "edCost", "edHome", "edStand"];
+const SALES_SORTS = ["name", "revenue", "profit", "sold"];
 let state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME, sellSort: "name" } };
 let cart = {};
 let currentTab = "sell";
 let padProductId = null;
 let padQty = 1;
 let editingProductId = null;
+// "" means every day. Deliberately not persisted — reopening the app should
+// show the whole history, not whatever day you last drilled into.
+let salesDay = "";
 let editEmoji = null;
 
 // Product names are typed by the user and get injected into innerHTML in a
@@ -480,6 +499,7 @@ function loadState(){
   if(typeof state.settings.qr === "undefined") state.settings.qr = null;
   if(!state.settings.name) state.settings.name = DEFAULT_STAND_NAME;
   if(state.settings.sellSort !== "stock") state.settings.sellSort = "name";
+  if(SALES_SORTS.indexOf(state.settings.salesSort) === -1) state.settings.salesSort = "name";
 }
 
 function standName(){
@@ -1015,57 +1035,187 @@ function moveToStand(id){
     : "Moved " + moved + " to the stand");
 }
 
-function renderSales(){
-  const wrap = document.getElementById("salesList");
-  const cost = totalCost();
-  const profit = totalProfit();
-  let byProduct = {};
+// Local calendar day of a sale, as YYYY-MM-DD.
+function saleDayKey(time){
+  const d = new Date(time);
+  return d.getFullYear() + "-" + pad2(d.getMonth() + 1) + "-" + pad2(d.getDate());
+}
+
+// Built from parts rather than parsing the string, which Date would read as
+// UTC and could shift a day backwards depending on the timezone.
+function dayLabel(key){
+  const p = key.split("-").map(Number);
+  const d = new Date(p[0], p[1] - 1, p[2]);
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  if(key === saleDayKey(Date.now())) return "Today";
+  if(key === saleDayKey(yesterday.getTime())) return "Yesterday";
+  return d.toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
+}
+
+// Days that actually have sales, newest first.
+function salesDays(){
+  const seen = {};
+  const keys = [];
   state.sales.forEach(s=>{
+    const k = saleDayKey(s.time);
+    if(!seen[k]){ seen[k] = true; keys.push(k); }
+  });
+  return keys.sort().reverse();
+}
+
+function salesInView(){
+  if(!salesDay) return state.sales.slice();
+  return state.sales.filter(s=> saleDayKey(s.time) === salesDay);
+}
+
+function setSalesDay(v){
+  salesDay = v;
+  renderSales();
+}
+
+function setSalesSort(mode){
+  state.settings.salesSort = (SALES_SORTS.indexOf(mode) === -1) ? "name" : mode;
+  saveState();
+  renderSales();
+}
+
+// Totals per product across the given sales, sorted by the chosen column.
+// Numeric sorts are descending — the biggest number is the interesting one —
+// and fall back to name so equal values keep a stable order.
+function breakdownRows(sales){
+  const by = {};
+  sales.forEach(s=>{
     s.items.forEach(it=>{
-      byProduct[it.name] = byProduct[it.name] || { emoji: it.emoji, qty:0, revenue:0, cost:0 };
-      byProduct[it.name].qty += it.qty;
-      byProduct[it.name].revenue += it.price * it.qty;
-      byProduct[it.name].cost += it.cost * it.qty;
+      const row = by[it.name] || (by[it.name] = { name: it.name, emoji: it.emoji, qty: 0, revenue: 0, cost: 0 });
+      row.qty += it.qty;
+      row.revenue += it.price * it.qty;
+      row.cost += it.cost * it.qty;
     });
   });
-  // Revenue is the jar's headline number just above, so it isn't repeated here.
-  let statsHtml = `<div class="stat-grid">
-      <div class="stat-card"><div class="num">${money(cost)}</div><div class="lab">cost</div></div>
-      <div class="stat-card"><div class="num">${money(profit)}</div><div class="lab">profit</div></div>
-    </div>`;
-  let breakdownHtml = "";
-  const names = Object.keys(byProduct);
-  if(names.length){
-    breakdownHtml = names.map(n=>{
-      const d = byProduct[n];
-      const prof = d.revenue - d.cost;
-      return `<div class="row-card"><div class="row-emoji">${d.emoji}</div><div class="row-main"><div class="row-name">${escapeHtml(n)}</div><div class="row-detail">${d.qty} sold &nbsp;•&nbsp; ${money(prof)} profit</div></div><div class="row-name">${money(d.revenue)}</div></div>`;
-    }).join("");
-  }
-  let logHtml = "";
-  if(state.sales.length === 0){
-    logHtml = `<div class="empty-msg">No sales recorded yet.</div>`;
-  } else {
-    const recent = state.sales.slice().reverse().slice(0, 25);
-    logHtml = `<div class="form-card">` + recent.map((s, i)=>{
-      const t = new Date(s.time);
-      const timeStr = t.toLocaleTimeString([], {hour:'numeric', minute:'2-digit'});
-      const itemsStr = s.items.map(it=> `${it.qty}x ${it.emoji} ${escapeHtml(it.name)}`).join(", ");
-      // Only the newest sale can be undone — reversing an older one would
-      // mean unwinding the stock changes made after it.
-      return `<div class="sale-log-item">
-        <div class="sale-log-top"><span>${money(s.revenue)}</span><span class="sale-time">${timeStr}</span></div>
-        <div class="sale-items">${itemsStr}</div>
-        ${i === 0 ? `<button class="btn btn-danger undo-btn" onclick="undoLastSale()">Undo this sale</button>` : ""}
+  const rows = Object.keys(by).map(n=>{
+    const r = by[n];
+    r.profit = r.revenue - r.cost;
+    return r;
+  });
+  const mode = state.settings.salesSort;
+  if(mode === "revenue") rows.sort((a, b)=> (b.revenue - a.revenue) || byName(a, b));
+  else if(mode === "profit") rows.sort((a, b)=> (b.profit - a.profit) || byName(a, b));
+  else if(mode === "sold") rows.sort((a, b)=> (b.qty - a.qty) || byName(a, b));
+  else rows.sort(byName);
+  return rows;
+}
+
+function saleLogItem(sale, isNewest){
+  const t = new Date(sale.time);
+  const timeStr = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  const itemsStr = sale.items.map(it=> `${it.qty}x ${it.emoji} ${escapeHtml(it.name)}`).join(", ");
+  return `<div class="sale-log-item">
+    <div class="sale-log-top"><span>${money(sale.revenue)}</span><span class="sale-time">${timeStr}</span></div>
+    <div class="sale-items">${itemsStr}</div>
+    ${isNewest ? `<button class="btn btn-danger undo-btn" onclick="undoLastSale()">Undo this sale</button>` : ""}
+  </div>`;
+}
+
+function renderSales(){
+  const wrap = document.getElementById("salesList");
+  if(!wrap) return;
+
+  // A day filter can go stale when the last sale of that day is undone.
+  const days = salesDays();
+  if(salesDay && days.indexOf(salesDay) === -1) salesDay = "";
+  syncSalesControls(days);
+
+  const sales = salesInView();
+  const cost = sales.reduce((n, s)=> n + s.cost, 0);
+  const profit = sales.reduce((n, s)=> n + s.profit, 0);
+  const revenue = sales.reduce((n, s)=> n + s.revenue, 0);
+
+  // Revenue normally lives in the jar above, which is always all-time — so it
+  // only earns a card here when a single day is selected and the two differ.
+  const statsHtml = salesDay
+    ? `<div class="stat-grid three">
+        <div class="stat-card"><div class="num">${money(revenue)}</div><div class="lab">sales</div></div>
+        <div class="stat-card"><div class="num">${money(cost)}</div><div class="lab">cost</div></div>
+        <div class="stat-card"><div class="num">${money(profit)}</div><div class="lab">profit</div></div>
+      </div>`
+    : `<div class="stat-grid">
+        <div class="stat-card"><div class="num">${money(cost)}</div><div class="lab">cost</div></div>
+        <div class="stat-card"><div class="num">${money(profit)}</div><div class="lab">profit</div></div>
       </div>`;
-    }).join("") + `</div>`;
-  }
-  const exportHtml = state.sales.length
-    ? `<button class="btn btn-teal-outline btn-full" style="margin-bottom:16px;" onclick="exportSalesCsv()">Export sales to CSV</button>`
+
+  const exportHtml = sales.length
+    ? `<button class="btn btn-teal-outline btn-full" style="margin-bottom:16px;" onclick="exportSalesCsv()">${
+        salesDay ? "Export " + escapeHtml(dayLabel(salesDay)) + " to CSV" : "Export all sales to CSV"
+      }</button>`
     : "";
+
+  const breakdownHtml = breakdownRows(sales).map(r=>
+    `<div class="row-card">
+      <div class="row-emoji">${r.emoji}</div>
+      <div class="row-main">
+        <div class="row-name">${escapeHtml(r.name)}</div>
+        <div class="row-detail">${r.qty} sold &nbsp;•&nbsp; ${money(r.profit)} profit</div>
+      </div>
+      <div class="row-name">${money(r.revenue)}</div>
+    </div>`
+  ).join("");
+
+  let logHtml;
+  if(sales.length === 0){
+    logHtml = `<div class="empty-msg">${
+      salesDay ? "No sales on that day." : "No sales recorded yet."
+    }</div>`;
+  } else {
+    // Undo only ever applies to the newest sale overall, which is not
+    // necessarily the first one shown once a day is selected.
+    const newestId = state.sales[state.sales.length - 1].id;
+    const recent = sales.slice().reverse().slice(0, 25);
+    if(salesDay){
+      logHtml = `<div class="form-card">` +
+        recent.map(s=> saleLogItem(s, s.id === newestId)).join("") + `</div>`;
+    } else {
+      // Grouped under a heading per day, each with that day's takings.
+      let out = "";
+      let openDay = null;
+      let group = "";
+      const flush = ()=>{
+        if(openDay === null) return;
+        const dayTotal = state.sales
+          .filter(s=> saleDayKey(s.time) === openDay)
+          .reduce((n, s)=> n + s.revenue, 0);
+        out += `<div class="day-head"><span class="d">${dayLabel(openDay)}</span><span class="t">${money(dayTotal)}</span></div>
+                <div class="form-card">${group}</div>`;
+        group = "";
+      };
+      recent.forEach(s=>{
+        const k = saleDayKey(s.time);
+        if(k !== openDay){ flush(); openDay = k; }
+        group += saleLogItem(s, s.id === newestId);
+      });
+      flush();
+      logHtml = out;
+    }
+  }
+
   wrap.innerHTML = statsHtml + exportHtml +
     `<div class="section-title">By product</div>` + breakdownHtml +
-    `<div class="section-title">Recent sales</div>` + logHtml;
+    `<div class="section-title">${salesDay ? "Sales" : "Recent sales"}</div>` + logHtml;
+}
+
+function syncSalesControls(days){
+  const sel = document.getElementById("salesDay");
+  if(sel){
+    sel.innerHTML = `<option value="">All days</option>` + days.map(k=>
+      `<option value="${k}">${escapeHtml(dayLabel(k))}</option>`
+    ).join("");
+    sel.value = salesDay;
+  }
+  const controls = document.getElementById("salesControls");
+  if(controls) controls.style.display = state.sales.length ? "" : "none";
+  document.querySelectorAll("#salesSortBar .sort-btn").forEach(b=>{
+    b.classList.toggle("active", b.dataset.ssort === state.settings.salesSort);
+  });
 }
 
 function renderSetup(){
@@ -1344,8 +1494,11 @@ function csvCell(value){
 
 function pad2(n){ return n < 10 ? "0" + n : String(n); }
 
+// Exports whatever the Sales tab is currently showing, so a day filter is
+// carried into the file rather than being silently ignored.
 function exportSalesCsv(){
-  if(state.sales.length === 0){
+  const sales = salesInView();
+  if(sales.length === 0){
     showToast("No sales to export yet");
     return;
   }
@@ -1355,7 +1508,7 @@ function exportSalesCsv(){
     "Date","Time","Sale ID","Product","Quantity",
     "Unit price","Unit cost","Line revenue","Line cost","Line profit"
   ]];
-  state.sales.forEach(sale=>{
+  sales.forEach(sale=>{
     const d = new Date(sale.time);
     const date = d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate());
     const time = pad2(d.getHours()) + ":" + pad2(d.getMinutes());
@@ -1372,7 +1525,7 @@ function exportSalesCsv(){
 
   const csv = rows.map(r=> r.map(csvCell).join(",")).join("\r\n");
   const now = new Date();
-  const stamp = now.getFullYear() + "-" + pad2(now.getMonth()+1) + "-" + pad2(now.getDate());
+  const stamp = salesDay || (now.getFullYear() + "-" + pad2(now.getMonth()+1) + "-" + pad2(now.getDate()));
   // The BOM makes Excel read it as UTF-8 rather than mangling accented names.
   downloadFile("﻿" + csv, "lemonade-sales-" + stamp + ".csv", "text/csv;charset=utf-8");
   showToast("Sales exported");
@@ -1597,6 +1750,19 @@ function buildApp(){
     </section>
 
     <section id="sec-sales">
+      <div id="salesControls">
+        <div class="filter-row">
+          <span class="sort-label">Day</span>
+          <select class="select-box" id="salesDay" onchange="setSalesDay(this.value)"></select>
+        </div>
+        <div class="sort-bar" id="salesSortBar">
+          <span class="sort-label">Sort</span>
+          <button class="sort-btn" data-ssort="name" onclick="setSalesSort('name')">Name</button>
+          <button class="sort-btn" data-ssort="revenue" onclick="setSalesSort('revenue')">Sales</button>
+          <button class="sort-btn" data-ssort="profit" onclick="setSalesSort('profit')">Profit</button>
+          <button class="sort-btn" data-ssort="sold" onclick="setSalesSort('sold')">Sold</button>
+        </div>
+      </div>
       <div id="salesList"></div>
     </section>
 
