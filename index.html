@@ -80,6 +80,17 @@
     color:var(--lemon-dark);
   }
   .tile-qty.low{background:#FFE1E1;color:var(--danger);}
+  .tile-qty.untracked{background:#E7F7F4;color:var(--teal-dark);}
+  .check-row{
+    display:flex;align-items:center;gap:9px;
+    margin:14px 0 4px;font-size:13.5px;font-weight:700;
+    color:var(--plum);cursor:pointer;
+  }
+  .check-row input{width:19px;height:19px;flex:none;accent-color:var(--teal);cursor:pointer;}
+  .restock-note{
+    font-size:12.5px;color:var(--plum-soft);
+    text-align:center;padding:6px 10px 2px;
+  }
   .tile-cart-badge{
     position:absolute;top:10px;right:10px;
     background:var(--pink);color:#fff;
@@ -487,7 +498,13 @@ function loadState(){
     const raw = localStorage.getItem(STORAGE_KEY);
     if(raw){
       state = JSON.parse(raw);
-      state.products.forEach(p=>{ if(typeof p.cost !== "number") p.cost = 0; });
+      state.products.forEach(p=>{
+        if(typeof p.cost !== "number") p.cost = 0;
+        // Normalised so the flag is always a boolean, and so an untracked
+        // product can't carry stale counts from before it was switched over.
+        p.untracked = p.untracked === true;
+        if(p.untracked){ p.home = 0; p.stand = 0; }
+      });
     }
   }catch(e){
     state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME, sellSort: "name" } };
@@ -595,6 +612,15 @@ function renderTop(){
 
 function lowStockClass(qty){ return qty <= 2 ? "low" : ""; }
 
+// Products flagged untracked have no storage or stand counts — they can
+// always be sold and never run out. The flag is absent on older data, which
+// reads as falsy, so existing products stay tracked.
+function isTracked(p){ return !p.untracked; }
+
+// How many of this product can still be added to the cart. Infinity for
+// untracked products, so every cap and clamp below just works.
+function availableAtStand(p){ return isTracked(p) ? p.stand : Infinity; }
+
 function byName(a, b){
   return a.name.localeCompare(b.name, undefined, { sensitivity: "base", numeric: true });
 }
@@ -610,7 +636,10 @@ function productsByName(){
 // around unpredictably between renders.
 function sortedProducts(mode){
   if(mode !== "stock") return productsByName();
-  return state.products.slice().sort((a, b)=> (a.stand - b.stand) || byName(a, b));
+  // Untracked products can never run out, so they sort to the end rather
+  // than sitting at the top on a count of zero they don't really have.
+  return state.products.slice().sort((a, b)=>
+    (availableAtStand(a) - availableAtStand(b)) || byName(a, b));
 }
 
 function setSellSort(mode){
@@ -689,8 +718,8 @@ function renderSell(){
     const unallocated = p.stand - inCart;
     // Only truly out-of-stock products are disabled. A product whose whole
     // stand quantity is already in the cart stays tappable so the pad can
-    // be reopened to lower the number.
-    const empty = p.stand <= 0;
+    // be reopened to lower the number, and untracked ones never run out.
+    const empty = isTracked(p) && p.stand <= 0;
     const div = document.createElement("div");
     div.className = "tile" + (empty ? " empty" : "");
     div.id = "tile-" + p.id;
@@ -699,7 +728,9 @@ function renderSell(){
       <div class="tile-emoji">${p.emoji}</div>
       <div class="tile-name">${escapeHtml(p.name)}</div>
       <div class="tile-price">${money(p.price)}</div>
-      <div class="tile-qty ${lowStockClass(unallocated)}">${unallocated} at stand</div>
+      ${isTracked(p)
+        ? `<div class="tile-qty ${lowStockClass(unallocated)}">${unallocated} at stand</div>`
+        : `<div class="tile-qty untracked">no limit</div>`}
     `;
     div.onclick = ()=> openQtyPad(p.id);
     grid.appendChild(div);
@@ -711,14 +742,14 @@ function renderSell(){
 function openQtyPad(productId){
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
-  if(p.stand <= 0){
+  if(availableAtStand(p) <= 0){
     showToast("None left at the stand — restock first");
     return;
   }
   padProductId = productId;
   // Reopening on a product already in the cart edits that quantity
   // rather than stacking a second entry on top of it.
-  padQty = Math.min(cartQtyFor(productId) || 1, p.stand);
+  padQty = Math.min(cartQtyFor(productId) || 1, availableAtStand(p));
   renderQtyPad();
 }
 
@@ -730,9 +761,10 @@ function closeQtyPad(){
 function padSetQty(n){
   const p = state.products.find(x=>x.id===padProductId);
   if(!p) return;
-  if(n > p.stand){
-    showToast("Only " + p.stand + " at the stand");
-    n = p.stand;
+  const max = availableAtStand(p);
+  if(n > max){
+    showToast("Only " + max + " at the stand");
+    n = max;
   }
   padQty = Math.max(0, n);
   renderQtyPad();
@@ -757,7 +789,7 @@ function renderQtyPad(){
   const p = state.products.find(x=>x.id===padProductId);
   if(!p){ host.innerHTML = ""; return; }
   const inCart = cartQtyFor(p.id);
-  const chips = QUICK_PICKS.filter(n=> n <= p.stand)
+  const chips = QUICK_PICKS.filter(n=> n <= availableAtStand(p))
     .map(n=> `<button class="chip" onclick="padSetQty(${n})">${n}</button>`).join("");
   host.innerHTML = `
     <div class="pad-overlay" onclick="if(event.target===this) closeQtyPad()">
@@ -772,7 +804,7 @@ function renderQtyPad(){
         </div>
         <div class="pad-chips">${chips}</div>
         <div class="pad-total">${money(p.price * padQty)}</div>
-        <div class="pad-avail">${p.stand} at the stand</div>
+        <div class="pad-avail">${isTracked(p) ? p.stand + " at the stand" : "Inventory not tracked"}</div>
         <div class="pad-actions">
           <button class="btn btn-ghost" onclick="closeQtyPad()">Cancel</button>
           <button class="btn btn-pink" onclick="confirmQtyPad()">${inCart > 0 ? "Update sale" : "Add to sale"}</button>
@@ -787,7 +819,7 @@ function changeCartQty(productId, delta){
   const p = state.products.find(x=>x.id===productId);
   if(!p) return;
   if(next < 0) next = 0;
-  if(next > p.stand) next = p.stand;
+  if(next > availableAtStand(p)) next = availableAtStand(p);
   if(next === 0) delete cart[productId];
   else cart[productId] = next;
   renderSell();
@@ -845,7 +877,9 @@ function completeSale(){
     const p = state.products.find(x=>x.id===pid);
     if(!p) return;
     const qty = cart[pid];
-    p.stand -= qty;
+    // Untracked products have no count to draw down; the sale is still
+    // recorded so revenue and profit include them.
+    if(isTracked(p)) p.stand -= qty;
     revenue += p.price * qty;
     cost += p.cost * qty;
     items.push({ productId: p.id, name: p.name, emoji: p.emoji, qty, price: p.price, cost: p.cost });
@@ -882,9 +916,10 @@ function undoLastSale(){
   let missing = 0;
   sale.items.forEach(it=>{
     const p = state.products.find(x=>x.id === it.productId);
-    // A product deleted since the sale has nowhere to put the stock back.
-    if(p) p.stand += it.qty;
-    else missing++;
+    // A product deleted since the sale has nowhere to put the stock back,
+    // and an untracked one keeps no count to restore.
+    if(p && isTracked(p)) p.stand += it.qty;
+    else if(!p) missing++;
   });
 
   saveState();
@@ -902,8 +937,16 @@ function renderRestock(){
     wrap.innerHTML = `<div class="empty-msg">Add a product first in the Products tab.</div>`;
     return;
   }
+  // Untracked products have no counts to move, so they'd be a row of dead
+  // controls here. They're left out, with a note so they aren't just missing.
+  const tracked = state.products.filter(isTracked);
+  const skipped = state.products.length - tracked.length;
+  if(tracked.length === 0){
+    wrap.innerHTML = `<div class="empty-msg">No products track inventory, so there's nothing to move.</div>`;
+    return;
+  }
   wrap.innerHTML = "";
-  state.products.forEach(p=>{
+  tracked.forEach(p=>{
     const chips = QUICK_PICKS
       .map(n=> `<button class="chip" onclick="setRestockQty('${p.id}',${n})">${n}</button>`).join("");
     const row = document.createElement("div");
@@ -930,6 +973,13 @@ function renderRestock(){
     `;
     wrap.appendChild(row);
   });
+  if(skipped > 0){
+    const note = document.createElement("div");
+    note.className = "restock-note";
+    note.textContent = skipped + " product" + (skipped === 1 ? " doesn't" : "s don't") +
+      " track inventory, so " + (skipped === 1 ? "it isn't" : "they aren't") + " listed here.";
+    wrap.appendChild(note);
+  }
 }
 
 function setRestockQty(id, n){
@@ -985,13 +1035,13 @@ function moveToStorage(id){
 // Taking stock off the stand can leave an in-progress cart asking for more
 // than is there, which would drive the count negative on completing the sale.
 function clampCartTo(p){
-  if(!cart[p.id] || cart[p.id] <= p.stand) return;
+  if(!cart[p.id] || cart[p.id] <= availableAtStand(p)) return;
   if(p.stand > 0) cart[p.id] = p.stand;
   else delete cart[p.id];
 }
 
 function totalAtStand(){
-  return state.products.reduce((n, p)=> n + p.stand, 0);
+  return state.products.reduce((n, p)=> n + (isTracked(p) ? p.stand : 0), 0);
 }
 
 // End of the day: everything off the stand and back into storage at once.
@@ -1006,7 +1056,7 @@ function returnAllToStorage(){
   if(cartCount() > 0) lines.push("The sale you're building will be cleared.");
   if(!confirm(lines.join("\n"))) return;
 
-  state.products.forEach(p=>{
+  state.products.filter(isTracked).forEach(p=>{
     p.home += p.stand;
     p.stand = 0;
   });
@@ -1234,7 +1284,9 @@ function renderSetup(){
         <div class="row-emoji">${p.emoji}</div>
         <div class="row-main">
           <div class="row-name">${escapeHtml(p.name)}</div>
-          <div class="row-detail">Sell ${money(p.price)} &nbsp;•&nbsp; Cost ${money(p.cost)} &nbsp;•&nbsp; Storage ${p.home} / Stand ${p.stand}</div>
+          <div class="row-detail">Sell ${money(p.price)} &nbsp;•&nbsp; Cost ${money(p.cost)} &nbsp;•&nbsp; ${
+            isTracked(p) ? `Storage ${p.home} / Stand ${p.stand}` : "Not tracked"
+          }</div>
         </div>
         <div class="row-actions">
           <button class="btn btn-teal-outline" onclick="startEditProduct('${p.id}')">Edit</button>
@@ -1257,6 +1309,14 @@ function iconPickerHtml(which, selected){
     `</div>`
   ).join("");
   return `<div class="icon-picker" data-picker="${which}">${groups}</div>`;
+}
+
+// Hides the count fields when a product isn't tracking inventory, so the
+// form never asks for numbers it will ignore.
+function syncTrackFields(prefix){
+  const cb = document.getElementById(prefix + "Untracked");
+  const box = document.getElementById(prefix + "StockFields");
+  if(cb && box) box.style.display = cb.checked ? "none" : "";
 }
 
 function selectedIcon(which){
@@ -1284,16 +1344,22 @@ function editFormHtml(p){
           <div class="field-error" id="edCostErr"></div>
         </div>
       </div>
-      <div class="two-col">
-        <div>
-          <label>In storage</label>
-          <input type="number" id="edHome" min="0" value="${p.home}">
-          <div class="field-error" id="edHomeErr"></div>
-        </div>
-        <div>
-          <label>At the stand</label>
-          <input type="number" id="edStand" min="0" value="${p.stand}">
-          <div class="field-error" id="edStandErr"></div>
+      <label class="check-row">
+        <input type="checkbox" id="edUntracked" ${isTracked(p) ? "" : "checked"} onchange="syncTrackFields('ed')">
+        <span>Don't track inventory for this one</span>
+      </label>
+      <div id="edStockFields"${isTracked(p) ? "" : ` style="display:none;"`}>
+        <div class="two-col">
+          <div>
+            <label>In storage</label>
+            <input type="number" id="edHome" min="0" value="${p.home}">
+            <div class="field-error" id="edHomeErr"></div>
+          </div>
+          <div>
+            <label>At the stand</label>
+            <input type="number" id="edStand" min="0" value="${p.stand}">
+            <div class="field-error" id="edStandErr"></div>
+          </div>
         </div>
       </div>
       <label>Pick an icon</label>
@@ -1325,24 +1391,25 @@ function cancelEditProduct(){
 function saveProductEdit(){
   const p = state.products.find(x=>x.id===editingProductId);
   if(!p){ cancelEditProduct(); return; }
-  const values = readProductForm({
-    name: "edName", price: "edPrice", cost: "edCost", home: "edHome", stand: "edStand"
-  });
+  const untracked = document.getElementById("edUntracked").checked;
+  const ids = { name: "edName", price: "edPrice", cost: "edCost" };
+  if(!untracked){ ids.home = "edHome"; ids.stand = "edStand"; }
+  const values = readProductForm(ids);
   if(!values) return;
 
   p.name = values.name;
   p.price = values.price;
   p.cost = values.cost;
+  p.untracked = untracked;
+  // Turning tracking off zeroes the counts rather than leaving numbers that
+  // nothing maintains and nothing displays.
   p.home = values.home;
   p.stand = values.stand;
   p.emoji = editEmoji || p.emoji;
 
   // Lowering the stand count can leave an in-progress cart asking for more
   // than exists, which would drive stock negative on completing the sale.
-  if(cart[p.id] && cart[p.id] > p.stand){
-    if(p.stand > 0) cart[p.id] = p.stand;
-    else delete cart[p.id];
-  }
+  clampCartTo(p);
 
   saveState();
   editingProductId = null;
@@ -1446,7 +1513,9 @@ function readProductForm(ids){
     }
     return n;
   };
-  const home = wholeNumber(ids.home);
+  // Omitted ids mean the field isn't on screen — an untracked product has no
+  // counts to read, so those checks are skipped rather than failing on blanks.
+  const home = ids.home ? wholeNumber(ids.home) : 0;
   const stand = ids.stand ? wholeNumber(ids.stand) : 0;
 
   if(bad.length){
@@ -1458,9 +1527,10 @@ function readProductForm(ids){
 }
 
 function addProduct(){
-  const values = readProductForm({
-    name: "newName", price: "newPrice", cost: "newCost", home: "newHome"
-  });
+  const untracked = document.getElementById("newUntracked").checked;
+  const ids = { name: "newName", price: "newPrice", cost: "newCost" };
+  if(!untracked) ids.home = "newHome";
+  const values = readProductForm(ids);
   if(!values) return;
   const emoji = selectedIcon("add");
 
@@ -1470,6 +1540,7 @@ function addProduct(){
     price: values.price,
     cost: values.cost,
     emoji,
+    untracked: untracked,
     home: values.home,
     stand: 0
   });
@@ -1478,6 +1549,8 @@ function addProduct(){
   document.getElementById("newPrice").value = "";
   document.getElementById("newCost").value = "";
   document.getElementById("newHome").value = "";
+  document.getElementById("newUntracked").checked = false;
+  syncTrackFields("new");
   document.querySelectorAll("#emojiPick .emoji-opt").forEach(e=> e.classList.remove("sel"));
   document.querySelector("#emojiPick .emoji-opt").classList.add("sel");
   document.getElementById("emojiPick").querySelector(".icon-picker").scrollTop = 0;
@@ -1784,9 +1857,15 @@ function buildApp(){
             <div class="field-error" id="newCostErr"></div>
           </div>
         </div>
-        <label>Starting stock in storage</label>
-        <input type="number" id="newHome" min="0" placeholder="10">
-        <div class="field-error" id="newHomeErr"></div>
+        <label class="check-row">
+          <input type="checkbox" id="newUntracked" onchange="syncTrackFields('new')">
+          <span>Don't track inventory for this one</span>
+        </label>
+        <div id="newStockFields">
+          <label>Starting stock in storage</label>
+          <input type="number" id="newHome" min="0" placeholder="10">
+          <div class="field-error" id="newHomeErr"></div>
+        </div>
         <label>Pick an icon</label>
         <div id="emojiPick"></div>
         <button class="btn btn-pink btn-full" style="margin-top:14px;" onclick="addProduct()">Add product</button>
