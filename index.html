@@ -358,6 +358,12 @@
   }
   .cart-qty:active{background:#F3EFE3;}
   .cart-x{background:#FDE9E9;color:var(--danger);}
+  .tip-amt{flex:1;text-align:right;padding-right:8px;}
+  input.tip-input{
+    width:100%;text-align:center;
+    font-size:22px;font-weight:800;
+    margin:14px 0 12px;
+  }
   .pad-overlay{
     position:fixed;inset:0;z-index:60;
     background:rgba(45,27,51,0.45);
@@ -464,6 +470,7 @@ const QUICK_PICKS = [1, 2, 5, 10];
 const PRODUCT_FIELDS = ["newName", "newPrice", "newCost", "newHome"];
 const EDIT_FIELDS = ["edName", "edPrice", "edCost", "edHome", "edStand"];
 const SALES_SORTS = ["name", "revenue", "profit", "sold"];
+const TIP_PICKS = [0.25, 0.5, 1, 2, 5];
 let state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME, sellSort: "name" } };
 let cart = {};
 let currentTab = "sell";
@@ -473,6 +480,10 @@ let editingProductId = null;
 // "" means every day. Deliberately not persisted — reopening the app should
 // show the whole history, not whatever day you last drilled into.
 let salesDay = "";
+// Tip on the sale being built. Transient like the cart itself.
+let cartTip = 0;
+let tipPadOpen = false;
+let tipDraft = 0;
 let editEmoji = null;
 
 // Product names are typed by the user and get injected into innerHTML in a
@@ -512,6 +523,8 @@ function loadState(){
   // Data saved before settings existed has no settings key.
   if(!state.products) state.products = [];
   if(!state.sales) state.sales = [];
+  // Sales recorded before tips existed have no tip field.
+  state.sales.forEach(s=>{ if(typeof s.tip !== "number") s.tip = 0; });
   if(!state.settings) state.settings = {};
   if(typeof state.settings.qr === "undefined") state.settings.qr = null;
   if(!state.settings.name) state.settings.name = DEFAULT_STAND_NAME;
@@ -566,7 +579,7 @@ function totalItemsSold(){
 
 function cartQtyFor(productId){ return cart[productId] || 0; }
 function cartCount(){ return Object.values(cart).reduce((a,b)=>a+b,0); }
-function cartTotal(){
+function cartItemsTotal(){
   let t = 0;
   Object.keys(cart).forEach(pid=>{
     const p = state.products.find(x=>x.id===pid);
@@ -574,6 +587,8 @@ function cartTotal(){
   });
   return t;
 }
+
+function cartTotal(){ return cartItemsTotal() + cartTip; }
 
 function jarSvg(pct){
   pct = Math.max(0, Math.min(1, pct));
@@ -830,6 +845,79 @@ function removeFromCart(productId){
   renderSell();
 }
 
+function openTipPad(){
+  tipPadOpen = true;
+  tipDraft = cartTip;
+  renderTipPad();
+  const el = document.getElementById("tipInput");
+  if(el) el.focus();
+}
+
+function closeTipPad(){
+  tipPadOpen = false;
+  renderTipPad();
+}
+
+// Chips and typing both update only the running total, never re-rendering
+// the pad — a full re-render would drop focus out of the input mid-entry.
+function refreshTipTotal(){
+  const tot = document.querySelector("#tipHost .pad-total");
+  if(tot) tot.textContent = money(cartItemsTotal() + tipDraft);
+}
+
+function tipSet(v){
+  tipDraft = v;
+  const el = document.getElementById("tipInput");
+  if(el) el.value = v.toFixed(2);
+  refreshTipTotal();
+}
+
+function tipFromInput(){
+  const el = document.getElementById("tipInput");
+  const v = parseFloat(el.value);
+  tipDraft = (isNaN(v) || v < 0) ? 0 : v;
+  refreshTipTotal();
+}
+
+function confirmTip(){
+  cartTip = tipDraft;
+  tipPadOpen = false;
+  renderTipPad();
+  renderSell();
+}
+
+function clearTip(){
+  cartTip = 0;
+  renderSell();
+}
+
+function renderTipPad(){
+  const host = document.getElementById("tipHost");
+  if(!host) return;
+  if(!tipPadOpen){ host.innerHTML = ""; return; }
+  const chips = TIP_PICKS.map(v=>
+    `<button class="chip" onclick="tipSet(${v})">${money(v)}</button>`
+  ).join("");
+  host.innerHTML = `
+    <div class="pad-overlay" onclick="if(event.target===this) closeTipPad()">
+      <div class="pad-card">
+        <div class="pad-emoji">&#128176;</div>
+        <div class="pad-name">Tip</div>
+        <div class="pad-each">Added to this sale</div>
+        <input type="number" class="tip-input" id="tipInput" min="0" step="0.25"
+               value="${tipDraft > 0 ? tipDraft.toFixed(2) : ""}" placeholder="0.00"
+               oninput="tipFromInput()">
+        <div class="pad-chips">${chips}</div>
+        <div class="pad-total">${money(cartItemsTotal() + tipDraft)}</div>
+        <div class="pad-avail">total with tip</div>
+        <div class="pad-actions">
+          <button class="btn btn-ghost" onclick="closeTipPad()">Cancel</button>
+          <button class="btn btn-pink" onclick="confirmTip()">Save tip</button>
+        </div>
+      </div>
+    </div>`;
+}
+
 function renderCart(){
   const area = document.getElementById("cartArea");
   if(!area) return;
@@ -849,6 +937,14 @@ function renderCart(){
       <button class="btn btn-round cart-x" onclick="removeFromCart('${pid}')" title="Remove">&times;</button>
     </div>`;
   });
+  if(cartTip > 0){
+    rows += `<div class="cart-row">
+      <span style="font-size:18px;">&#128176;</span>
+      <span class="name">Tip</span>
+      <button class="cart-qty tip-amt" onclick="openTipPad()" title="Tap to change">${money(cartTip)}</button>
+      <button class="btn btn-round cart-x" onclick="clearTip()" title="Remove tip">&times;</button>
+    </div>`;
+  }
   area.innerHTML = `<div class="cart-card">
     <div class="cart-rows">${rows}</div>
     <div class="cart-total">
@@ -857,6 +953,7 @@ function renderCart(){
     </div>
     <div class="pad-actions" style="margin-top:8px;">
       <button class="btn btn-ghost" onclick="cancelSale()">Cancel</button>
+      <button class="btn btn-teal-outline cart-qr-btn" onclick="openTipPad()" title="${cartTip > 0 ? "Change tip" : "Add a tip"}">${cartTip > 0 ? "&#128176;&#10003;" : "&#128176;"}</button>
       ${state.settings.qr ? `<button class="btn btn-teal-outline cart-qr-btn" onclick="showPaymentCode()" title="Show payment code">QR</button>` : ""}
       <button class="btn btn-pink" style="flex:2;" onclick="completeSale()">Complete sale</button>
     </div>
@@ -884,9 +981,13 @@ function completeSale(){
     cost += p.cost * qty;
     items.push({ productId: p.id, name: p.name, emoji: p.emoji, qty, price: p.price, cost: p.cost });
   });
-  const sale = { id: uid(), items, revenue, cost, profit: revenue - cost, time: Date.now() };
+  // A tip is revenue with no cost against it, so it lands wholly in profit.
+  const tip = cartTip;
+  revenue += tip;
+  const sale = { id: uid(), items, tip, revenue, cost, profit: revenue - cost, time: Date.now() };
   state.sales.push(sale);
   cart = {};
+  cartTip = 0;
   saveState();
   renderSell();
   renderTop();
@@ -898,8 +999,10 @@ function completeSale(){
 function cancelSale(){
   const count = cartCount();
   if(count === 0) return;
-  if(!confirm("Cancel this sale?\n\nThe " + count + " item" + (count===1?"":"s") + " in it will be cleared.")) return;
+  const what = count + " item" + (count === 1 ? "" : "s") + (cartTip > 0 ? " and the " + money(cartTip) + " tip" : "");
+  if(!confirm("Cancel this sale?\n\nThe " + what + " in it will be cleared.")) return;
   cart = {};
+  cartTip = 0;
   closePaymentCode();
   renderSell();
   showToast("Sale cancelled");
@@ -1061,6 +1164,7 @@ function returnAllToStorage(){
     p.stand = 0;
   });
   cart = {};
+  cartTip = 0;
   saveState();
   renderRestock();
   renderSell();
@@ -1200,6 +1304,20 @@ function renderSales(){
       }</button>`
     : "";
 
+  // Tips belong to the sale, not to any product, so they get their own row
+  // after the products — without it the breakdown wouldn't sum to revenue.
+  const tips = sales.reduce((n, s)=> n + (s.tip || 0), 0);
+  const tipsRow = tips > 0
+    ? `<div class="row-card">
+        <div class="row-emoji">&#128176;</div>
+        <div class="row-main">
+          <div class="row-name">Tips</div>
+          <div class="row-detail">all profit &nbsp;•&nbsp; not tied to a product</div>
+        </div>
+        <div class="row-name">${money(tips)}</div>
+      </div>`
+    : "";
+
   const breakdownHtml = breakdownRows(sales).map(r=>
     `<div class="row-card">
       <div class="row-emoji">${r.emoji}</div>
@@ -1249,7 +1367,7 @@ function renderSales(){
   }
 
   wrap.innerHTML = statsHtml + exportHtml +
-    `<div class="section-title">By product</div>` + breakdownHtml +
+    `<div class="section-title">By product</div>` + breakdownHtml + tipsRow +
     `<div class="section-title">${salesDay ? "Sales" : "Recent sales"}</div>` + logHtml;
 }
 
@@ -1594,6 +1712,15 @@ function exportSalesCsv(){
         revenue.toFixed(2), cost.toFixed(2), (revenue - cost).toFixed(2)
       ]);
     });
+    // A tip gets its own row so the Line revenue column still sums to the
+    // total. It has no cost, so the whole amount is profit.
+    if(sale.tip > 0){
+      rows.push([
+        date, time, sale.id, "(tip)", 1,
+        sale.tip.toFixed(2), "0.00",
+        sale.tip.toFixed(2), "0.00", sale.tip.toFixed(2)
+      ]);
+    }
   });
 
   const csv = rows.map(r=> r.map(csvCell).join(",")).join("\r\n");
@@ -1764,6 +1891,7 @@ function resetAllData(){
   }catch(e){ /* clearing a key that isn't there is not a failure */ }
   state = { products: [], sales: [], settings: { qr: null, name: DEFAULT_STAND_NAME, sellSort: "name" } };
   cart = {};
+  cartTip = 0;
   padProductId = null;
   editingProductId = null;
   editEmoji = null;
@@ -1884,6 +2012,7 @@ function buildApp(){
     </section>
 
     <div id="padHost"></div>
+    <div id="tipHost"></div>
     <div id="overlayHost"></div>
   `;
   document.getElementById("emojiPick").innerHTML = iconPickerHtml("add", EMOJI_CHOICES[0]);
@@ -1918,6 +2047,7 @@ function buildApp(){
   document.addEventListener("keydown", e=>{
     if(e.key !== "Escape") return;
     if(padProductId) closeQtyPad();
+    if(tipPadOpen) closeTipPad();
     closePaymentCode();
   });
 
