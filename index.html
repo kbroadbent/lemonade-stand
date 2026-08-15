@@ -714,6 +714,13 @@ function syncSearchVisibility(){
 function renderSell(){
   const wrap = document.getElementById("sellTiles");
   syncSearchVisibility();
+  // Set here rather than in renderCart, which the empty-state path below
+  // returns before ever reaching.
+  const standalone = document.getElementById("tipOnlyBtn");
+  if(standalone){
+    standalone.style.display =
+      (cartCount() === 0 && cartTip === 0 && state.products.length > 0) ? "" : "none";
+  }
   if(state.products.length === 0){
     wrap.innerHTML = `<div class="empty-msg">No products yet. Add one in the Products tab to start selling.</div>`;
     return;
@@ -922,7 +929,9 @@ function renderCart(){
   const area = document.getElementById("cartArea");
   if(!area) return;
   const count = cartCount();
-  if(count === 0){ area.innerHTML = ""; area.style.height = ""; return; }
+  // A tip with no items is a real sale — someone hands over a dollar and
+  // waves off the drink — so the card stays up for the tip alone.
+  if(count === 0 && cartTip === 0){ area.innerHTML = ""; area.style.height = ""; return; }
   let rows = "";
   Object.keys(cart).forEach(pid=>{
     const p = state.products.find(x=>x.id===pid);
@@ -948,7 +957,7 @@ function renderCart(){
   area.innerHTML = `<div class="cart-card">
     <div class="cart-rows">${rows}</div>
     <div class="cart-total">
-      <span>${count} item${count===1?"":"s"}</span>
+      <span>${count === 0 ? "Tip only" : count + " item" + (count === 1 ? "" : "s")}</span>
       <span class="amt">${money(cartTotal())}</span>
     </div>
     <div class="pad-actions" style="margin-top:8px;">
@@ -967,7 +976,7 @@ function renderCart(){
 
 function completeSale(){
   const count = cartCount();
-  if(count === 0) return;
+  if(count === 0 && cartTip <= 0) return;
   const items = [];
   let revenue = 0, cost = 0;
   Object.keys(cart).forEach(pid=>{
@@ -998,9 +1007,11 @@ function completeSale(){
 // stand yet, so this only throws away the cart.
 function cancelSale(){
   const count = cartCount();
-  if(count === 0) return;
-  const what = count + " item" + (count === 1 ? "" : "s") + (cartTip > 0 ? " and the " + money(cartTip) + " tip" : "");
-  if(!confirm("Cancel this sale?\n\nThe " + what + " in it will be cleared.")) return;
+  if(count === 0 && cartTip <= 0) return;
+  const parts = [];
+  if(count > 0) parts.push(count + " item" + (count === 1 ? "" : "s"));
+  if(cartTip > 0) parts.push("a " + money(cartTip) + " tip");
+  if(!confirm("Cancel this sale?\n\nThis clears " + parts.join(" and ") + ".")) return;
   cart = {};
   cartTip = 0;
   closePaymentCode();
@@ -1263,7 +1274,11 @@ function breakdownRows(sales){
 function saleLogItem(sale, isNewest){
   const t = new Date(sale.time);
   const timeStr = t.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-  const itemsStr = sale.items.map(it=> `${it.qty}x ${it.emoji} ${escapeHtml(it.name)}`).join(", ");
+  // A tip-only sale has no line items to list.
+  const itemsStr = sale.items.length
+    ? sale.items.map(it=> `${it.qty}x ${it.emoji} ${escapeHtml(it.name)}`).join(", ") +
+      (sale.tip > 0 ? ` &nbsp;•&nbsp; ${money(sale.tip)} tip` : "")
+    : `&#128176; Tip only`;
   return `<div class="sale-log-item">
     <div class="sale-log-top"><span>${money(sale.revenue)}</span><span class="sale-time">${timeStr}</span></div>
     <div class="sale-items">${itemsStr}</div>
@@ -1940,6 +1955,8 @@ function buildApp(){
         <button class="sort-btn" data-sort="name" onclick="setSellSort('name')">A&ndash;Z</button>
         <button class="sort-btn" data-sort="stock" onclick="setSellSort('stock')">Fewest left</button>
       </div>
+      <button class="btn btn-ghost btn-full" id="tipOnlyBtn" style="margin-bottom:12px;display:none;"
+              onclick="openTipPad()">&#128176; Just a tip, no items</button>
       <div id="sellTiles"></div>
     </section>
 
