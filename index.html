@@ -744,11 +744,11 @@ function syncEmptyBanner(count){
   if(count <= 0){ el.style.display = "none"; return; }
   el.style.display = "";
   const one = count === 1;
-  const noun = one ? "product has" : "products have";
+  const subject = one ? "product is" : "products are";
   const it = one ? "it" : "them";
   el.innerHTML = showEmpty
-    ? `${count} ${noun} none at the stand. <span class="act">Hide ${it}</span>`
-    : `${count} ${noun} none at the stand and ${one ? "is" : "are"} hidden. <span class="act">Show ${it}</span>`;
+    ? `${count} ${subject} not at the stand. <span class="act">Hide ${it}</span>`
+    : `${count} ${subject} not at the stand and ${one ? "is" : "are"} hidden. <span class="act">Show ${it}</span>`;
 }
 
 function renderSell(){
