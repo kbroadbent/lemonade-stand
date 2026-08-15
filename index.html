@@ -125,6 +125,15 @@
   }
   .search-clear.show{display:block;}
   .sort-bar{display:flex;align-items:center;gap:6px;margin:-4px 0 12px;flex-wrap:wrap;}
+  .empty-banner{
+    display:block;width:100%;text-align:left;
+    background:#FFF3D6;border:1px solid #F0DFAE;
+    border-radius:12px;padding:10px 14px;margin-bottom:12px;
+    font-family:'Nunito';font-weight:700;font-size:13px;
+    color:var(--lemon-dark);cursor:pointer;
+  }
+  .empty-banner:active{transform:scale(0.99);}
+  .empty-banner .act{text-decoration:underline;font-weight:800;}
   .filter-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
   .select-box{
     flex:1;min-width:0;
@@ -482,6 +491,8 @@ let editingProductId = null;
 let salesDay = "";
 // Tip on the sale being built. Transient like the cart itself.
 let cartTip = 0;
+// Out-of-stock products start hidden on every visit, hence not persisted.
+let showEmpty = false;
 let tipPadOpen = false;
 let tipDraft = 0;
 let editEmoji = null;
@@ -711,6 +722,35 @@ function syncSearchVisibility(){
   });
 }
 
+// Out of stock and therefore not sellable. A product sitting in the current
+// cart is never treated as out of stock, so an in-progress sale can't have a
+// line whose tile has vanished. Untracked products never qualify.
+function isOutOfStock(p){
+  return isTracked(p) && p.stand <= 0 && !cart[p.id];
+}
+
+function countOutOfStock(){
+  return state.products.filter(isOutOfStock).length;
+}
+
+function toggleShowEmpty(){
+  showEmpty = !showEmpty;
+  renderSell();
+}
+
+function syncEmptyBanner(count){
+  const el = document.getElementById("emptyBanner");
+  if(!el) return;
+  if(count <= 0){ el.style.display = "none"; return; }
+  el.style.display = "";
+  const one = count === 1;
+  const noun = one ? "product has" : "products have";
+  const it = one ? "it" : "them";
+  el.innerHTML = showEmpty
+    ? `${count} ${noun} none at the stand. <span class="act">Hide ${it}</span>`
+    : `${count} ${noun} none at the stand and ${one ? "is" : "are"} hidden. <span class="act">Show ${it}</span>`;
+}
+
 function renderSell(){
   const wrap = document.getElementById("sellTiles");
   syncSearchVisibility();
@@ -722,14 +762,30 @@ function renderSell(){
       (cartCount() === 0 && cartTip === 0 && state.products.length > 0) ? "" : "none";
   }
   if(state.products.length === 0){
+    syncEmptyBanner(0);
     wrap.innerHTML = `<div class="empty-msg">No products yet. Add one in the Products tab to start selling.</div>`;
     return;
   }
-  const shown = visibleProducts("sell");
-  if(shown.length === 0){
+  const matched = visibleProducts("sell");
+  if(matched.length === 0){
     // The cart still has to render, or an in-progress sale would disappear
     // the moment the search text stopped matching anything.
+    syncEmptyBanner(0);
     wrap.innerHTML = `<div class="empty-msg">No products match that search.</div><div id="cartArea"></div>`;
+    renderCart();
+    return;
+  }
+
+  // Products with nothing at the stand are hidden by default — they can't be
+  // sold, so they'd only be dead tiles. Searching for one still finds it:
+  // typing a name is explicit intent that outranks the tidying.
+  const searching = searchQuery.sell.trim() !== "";
+  const shown = (searching || showEmpty) ? matched : matched.filter(p=> !isOutOfStock(p));
+  const hiddenCount = matched.length - shown.length;
+  syncEmptyBanner(searching ? 0 : (showEmpty ? countOutOfStock() : hiddenCount));
+
+  if(shown.length === 0){
+    wrap.innerHTML = `<div class="empty-msg">Nothing is at the stand right now.<br>Move some stock over on the Restock tab.</div><div id="cartArea"></div>`;
     renderCart();
     return;
   }
@@ -1955,6 +2011,7 @@ function buildApp(){
         <button class="sort-btn" data-sort="name" onclick="setSellSort('name')">A&ndash;Z</button>
         <button class="sort-btn" data-sort="stock" onclick="setSellSort('stock')">Fewest left</button>
       </div>
+      <button class="empty-banner" id="emptyBanner" style="display:none;" onclick="toggleShowEmpty()"></button>
       <button class="btn btn-ghost btn-full" id="tipOnlyBtn" style="margin-bottom:12px;display:none;"
               onclick="openTipPad()">&#128176; Just a tip, no items</button>
       <div id="sellTiles"></div>
